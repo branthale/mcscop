@@ -63,7 +63,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 if (cspEnabled) {
     app.use(function(req, res, next) {
-        res.setHeader("Content-Security-Policy", "connect-src 'self' wss://" + url + "; worker-src 'self' https://" + url + " blob:; default-src 'unsafe-inline' 'unsafe-eval' 'self'; img-src 'self' data:;");
+        res.setHeader("Content-Security-Policy", "connect-src 'self' wss://" + url + "; connect-src 'self' ws://" + url + "; worker-src 'self' https://" + url + " blob:; default-src 'unsafe-inline' 'unsafe-eval' 'self'; img-src 'self' data:;");
         return next();
     });
 }
