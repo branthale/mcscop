@@ -34,6 +34,9 @@ html
             button.zoomIn#zoomInButton.ui-icon.ui-icon-zoomin
             button.zoomOut#zoomOutButton.ui-icon.ui-icon-zoomout
             button.cancelLink#cancelLinkButton Cancel Link
+          div#minimap
+            canvas#minimapBgCanvas
+            canvas#minimapCanvas
         div#toolbar
           div.toolbar-nav#toolbar-nav
             div.vert-tab#toolsTab
@@ -48,11 +51,11 @@ html
           div#toolbar-body
             div#notesForm.toolbar-form
               div#notes
-              button.btn.btn-primary#newNoteButton(style='margin-top: 5px') New Note
+              button.btn.btn-primary#newNoteButton(style='margin-top: 5px' disabled) New Note
             div#tasksForm.toolbar-form
-              textarea.tasks#hostTasks
-              textarea.tasks#networkTasks
-              textarea.tasks#ccirs
+              textarea.tasks#hostTasks(disabled)
+              textarea.tasks#networkTasks(disabled)
+              textarea.tasks#ccirs(disabled)
             div#filesForm.toolbar-form
               div#files
               div#progressbar-container
@@ -131,7 +134,7 @@ html
               div.form-group#makeObject
                   button.propButton.btn.btn-primary#insertObjectButton(type='button' disabled) Insert
                   button.propButton.btn.btn-info#editDetailsButton(type='button') Details
-                  button.propButton.btn.btn-danger#deleteObjectButton(type='button') Delete
+                  button.propButton.btn.btn-danger#deleteObjectButton(type='button' disabled) Delete
                   button.btn.btn-default#closeToolbarButton(type='button') Cancel
 
       div.jumbotron#tables(style="overflow: visible")
@@ -171,7 +174,8 @@ html
             div#channel-footer
               input(type="text", name="message-input-box")#message-input-box.message-input-box
         div#settings(style="display: none;")
-          div#settings-pane(style="height: 400px") Coming soon!
+          table#users
+          div#usersPager
     div#windowPane.window-pane
 script(type="template/text", id="details_template")
   div.window-dialog.modal-dialog

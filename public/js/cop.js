@@ -36,6 +36,8 @@ global.mission = getParameterByName('mission');
 if (!permissions)
     permissions = [];
 var diagram_rw = false;
+var tasks_rw = false;
+var details_rw = false;
 // bind buttons
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_diagram') !== -1) {
     diagram_rw = true;
@@ -70,12 +72,19 @@ $("#newNoteButton").click(function() { newNote(); });
 $("#downloadEventsButton").click(function() { downloadEvents(); });
 $("#downloadDiagramButton").click(function() { downloadDiagram(); });
 $("#downloadOpnotesButton").click(function() { downloadOpnotes(); });
-
+if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_tasks') !== -1) {
+    tasks_rw = true;
+    $("#hostTasks").prop('disabled', false);
+    $("#networkTasks").prop('disabled', false);
+    $("#ccirs").prop('disabled', false);
+}
 // more permissions stuff
 var events_rw = false;
 var events_del = false;
 var opnotes_rw = false;
 var opnotes_del = false;
+var users_rw = false;
+var notes_rw = false;
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('create_events') !== -1)
         events_rw = true;
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('delete_events') !== -1)
@@ -84,8 +93,19 @@ if (permissions.indexOf('all') !== -1 || permissions.indexOf('create_opnotes') !
         opnotes_rw = true;
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('delete_opnotes') !== -1)
         opnotes_del = true;
+if (permissions.indexOf('all') !== -1 || permissions.indexOf('manage_users') !== -1)
+        users_rw = true;
+if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_details') !== -1)
+        details_rw = true;
+if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_notes') !== -1) {
+        notes_rw = true;
+        $("#newNoteButton").prop('disabled', false);
+}
+
 
 // ---------------------------- FABRIC CANVASES ----------------------------------
+MAXWIDTH=2000;
+MAXHEIGHT=2000;
 fabric.Object.prototype.originX = fabric.Object.prototype.originY = 'center';
 fabric.Group.prototype.hasControls = false;
 fabric.Object.prototype.transparentCorners = false;
@@ -95,26 +115,28 @@ var canvas = new fabric.Canvas('canvas', {
     preserveObjectStacking: true,
     renderOnAddRemove: false,
     enableRetinaScaling: true,
-    uniScaleTransform: true
-});
-var background = new fabric.StaticCanvas('background', {
-    selection: false,
-    renderOnAddRemove: false,
-    enableRetinaScaling: true
+    uniScaleTransform: true,
+    width: 2000,
+    height: 2000
 });
 
-MAXWIDTH=4000;
-MAXHEIGHT=4000;
+// ---------------------------- MINIMAP ----------------------------------
+var minimap = document.getElementById('minimapCanvas');
+var minimapBg = document.getElementById('minimapBgCanvas');
+var minimapCtx = minimap.getContext('2d');
+var minimapBgCtx = minimapBg.getContext('2d');
+minimap.width = minimapBg.width = 100;
+minimap.height = minimapBg.height = 100;
 
-var settings = {'zoom': 1.0, 'x': 0, 'y': 0, 'diagram': 700, 'tools': 400, 'tasks': 400, 'notes': 400, 'files': 400};
+// ---------------------------- GLOBALS ----------------------------------
+var settings = {'zoom': 1.0, 'x': Math.round($('#diagram_jumbotron').width()/2), 'y': Math.round(700/2), 'diagram': 700, 'tools': 400, 'tasks': 400, 'notes': 400, 'files': 400};
 var earliest_messages = {}; //= 2147483647000;
 var creatingLink = false;
 var firstObject = null;
 var scale = 1;
-var offsetX = 0;
-var offsetY = 0;
 var objectSelect = [{id:0, name:'none/unknown'}];
 var userSelect = [{id:null, username:'none'}];
+var roleSelect = [{id:null, name:'none'}];
 var dateSlider = null;
 var objectsLoaded = null;
 var updatingObject = false;
@@ -127,9 +149,6 @@ var SVGCache = {};
 var tempLinks = [];
 var objectCache = {};
 var resizeTimer = null;
-var toolbarResizeTimer = null;
-var eventTableTimer = null;
-var opnoteTableTimer = null;
 var updateSettingsTimer = null;
 var sliderTimer = null;
 var activeToolbar = null;
@@ -142,6 +161,8 @@ var shouldBlur = false;
 var cellEdit = null;
 var cellEditRow = null;
 var clickComplete = false;
+var msgId = 0;
+var pendingMsg = [];
 global.lastselection = {id: null, iRow: null, iCol: null};
 var gridsize = 40;
 var lastFillColor = '#000000';
@@ -311,11 +332,12 @@ canvas.on('object:modified', function(options) {
     for (var i = 0; i < o.length; i++) {
         var z = canvas.getObjects().indexOf(o[i])/2;
         if (o[i].objType === 'link')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, z: z}}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, z: z}, msgId: msgHandler()}));
         else if (o[i].objType === 'icon')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, z: z, scale_x: o[i].scaleX, scale_y: o[i].scaleY, rot: o[i].angle}}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, z: z, scale_x: o[i].scaleX, scale_y: o[i].scaleY, rot: o[i].angle}, msgId: msgHandler()}));
         else if (o[i].objType === 'shape')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, z: z, scale_x: o[i].width, scale_y: o[i].height, rot: o[i].angle}}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, z: z, scale_x: o[i].width, scale_y: o[i].height, rot: o[i].angle}, msgId: msgHandler()}));
+        updateMinimapBg();
     }
 });
 
@@ -369,7 +391,7 @@ canvas.on('object:selected', function(options) {
                             z = canvas.getObjects().indexOf(o) - 1;
                         lastFillColor = $('#propFillColor').val();
                         lastFillColor = $('#propStrokeColor').val();
-                        diagram.send(JSON.stringify({act: 'insert_object', arg: {name:$('#propName').val(), type: 'link', image: $('#prop-link').val().replace('.png','.svg'), stroke_color:$('#propStrokeColor').val(), obj_a: firstNode.id, obj_b: o.id, z: z}}));
+                        diagram.send(JSON.stringify({act: 'insert_object', arg: {name:$('#propName').val(), type: 'link', image: $('#prop-link').val().replace('.png','.svg'), stroke_color:$('#propStrokeColor').val(), obj_a: firstNode.id, obj_b: o.id, z: z}, msgId: msgHandler()}));
                         firstNode = null;
                         creatingLink = false;
                     }
@@ -497,6 +519,24 @@ function checkIfShapesCached(msg) {
     }
 }
 
+function checkIfObjectsLoaded() {
+    if (objectsLoaded.length == 0) {
+        console.log('objects loaded');
+        $('#modal').modal('hide');
+        dirty = true;
+        updateMinimapBg();
+        canvas.renderAll();
+        canvas.renderOnAddRemove = true;
+    } else {
+        setTimeout(checkIfObjectsLoaded, 50);
+    }
+}
+
+//https://stackoverflow.com/questions/11832914/round-to-at-most-2-decimal-places-only-if-necessary
+Number.prototype.round = function(places) {
+  return +(Math.round(this + "e+" + places)  + "e-" + places);
+}
+
 // ---------------------------- CHAT / LOG WINDOW  ----------------------------------
 function addChatMessage(msg, bulk) {
     if (!bulk)
@@ -536,7 +576,7 @@ function addChatMessage(msg, bulk) {
 
 function getMoreMessages(channel) {
     $('#get-more-messages').remove();
-    diagram.send(JSON.stringify({act:'get_old_chats', arg: {channel: channel, start_from: earliest_messages[channel]}}));
+    diagram.send(JSON.stringify({act:'get_old_chats', arg: {channel: channel, start_from: earliest_messages[channel]}, msgId: msgHandler()}));
 }
 
 // ---------------------------- SETTINGS COOKIE ----------------------------------
@@ -547,11 +587,7 @@ function loadSettings() {
     settings = JSON.parse(dc.split('mcscop-settings=')[1]);
     $('#diagram_jumbotron').height(settings.diagram);
     canvas.setZoom(settings.zoom);
-    background.setZoom(settings.zoom);
-    canvas.relativePan({ x: -1 * settings.x, y: settings.y });
-    //background.relativePan({ x: -1 * settings.x, y: settings.y });
-    offsetX = settings.x;
-    offsetY = settings.y;
+    canvas.relativePan({ x: settings.x, y: settings.y });
 }
 
 function updateSettings() {
@@ -560,18 +596,6 @@ function updateSettings() {
     updateSettingsTimer = setTimeout(function() {
             document.cookie = "mcscop-settings=" + JSON.stringify(settings);
     }, 100);
-}
-
-function checkIfObjectsLoaded() {
-    if (objectsLoaded.length == 0) {
-        console.log('objects loaded');
-        $('#modal').modal('hide');
-        dirty = true;
-        canvas.renderAll();
-        canvas.renderOnAddRemove = true;
-    } else {
-        setTimeout(checkIfObjectsLoaded, 50);
-    }
 }
 
 function createNotesTree(arg) {
@@ -600,7 +624,7 @@ function createNotesTree(arg) {
                             'action': function (obj) {
                                 var _node = node;
                                 bootbox.prompt('Note name?', function(name) {
-                                    diagram.send(JSON.stringify({act: 'insert_note', arg: {name: name}}));
+                                    diagram.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
                                 });
                             }
                         },
@@ -609,7 +633,7 @@ function createNotesTree(arg) {
                             'separator_after': false,
                             'label': 'Delete Note',
                             'action': function (obj) {
-                                diagram.send(JSON.stringify({act: 'delete_note', arg: {id: node.id}}));
+                                diagram.send(JSON.stringify({act: 'delete_note', arg: {id: node.id}, msgId: msgHandler()}));
                             }
                         }
                     }
@@ -619,21 +643,24 @@ function createNotesTree(arg) {
 }
 
 function editDetails(id, name) {
+    var rw = false;
     if (!name)
         name = '';
     if (!id && canvas.getActiveObject()) {
+        if (details_rw)
+            rw = true;
         id = 'details-' + canvas.getActiveObject().id;
         if (canvas.getActiveObject().name_val)
             name = '- ' + canvas.getActiveObject().name_val.split('\n')[0];
+    } else {
+        console.log(notes_rw);
+        if (notes_rw)
+            rw = true;
     }
     if (id) {
         $('#modal-title').text('Edit Notes ' + name);
         $('#modal-footer').html('<button type="button btn-primary" class="button btn btn-default" data-dismiss="modal">Close</button>');
         $('#modal-content').addClass('modal-details');
-        //if (doc) {
-        //    doc.destroy();
-        //    doc = undefined;
-        //}
         if (!openDocs[id]) {
             openDocs[id] = shareDBConnection.get('mcscop', id);
             openDocs[id].subscribe(function(err) {
@@ -655,6 +682,7 @@ function editDetails(id, name) {
                     w.$el.draggable({ handle: '.modal-header' }).children('.window-content').resizable({ minHeight: 153, minWidth: 300});
                     var quill = new Quill('#object_details_' + id, {
                         theme: 'snow',
+                        readOnly: !rw,
                         modules: {
                             syntax: true,
                             toolbar: [
@@ -674,8 +702,21 @@ function editDetails(id, name) {
                         quill.updateContents(op);
                     });
                 } else {
-                    $('#modal-body').html('<input type="hidden" id="object_details_id" name="object_details_id" value="' + id + '"><textarea style="height:100%;" id="object_details" class="object-details" style="resize: none;"></textarea>');
-                    var element = document.getElementById('object_details');
+                    var disabled = ' disabled';
+                    if (details_rw)
+                        disabled = '';
+                    var w = windowManager.createWindow({
+                        sticky:  false,
+                        title: 'Edit Notes ' + name,
+                        effect: 'none',
+                        bodyContent: '<textarea id="object_details_' + id + '" class="object-details" style="resize: none; height: 100%"' + disabled + '></textarea>',
+                        closeCallback: function() {
+                            openDocs[id].destroy();
+                            delete openDocs[id];
+                        }    
+                    });
+                    w.$el.draggable({ handle: '.modal-header' }).children('.window-content').resizable({ minHeight: 153, minWidth: 300});
+                    var element = document.getElementById('object_details_' + id);
                     var binding = new StringBinding(element, openDocs[id]);
                     binding.setup();
                 }
@@ -685,26 +726,65 @@ function editDetails(id, name) {
     }
 }
 
+function updateMinimap() {
+    var scaleX = 100 / (MAXWIDTH * 2);
+    var scaleY = 100 / (MAXHEIGHT * 2);
+    var zoom = canvas.getZoom();
+    var mLeft = (MAXHEIGHT - settings.x / zoom) * scaleX;
+    var mTop = (MAXHEIGHT - settings.y / zoom) * scaleY;
+    var mWidth = (canvas.width / zoom) * scaleX;
+    var mHeight = (canvas.height / zoom) * scaleY;
+    minimapCtx.clearRect(0, 0, minimapCtx.canvas.width, minimapCtx.canvas.height);
+    minimapCtx.beginPath();
+    minimapCtx.rect(mLeft, mTop, mWidth, mHeight);
+    minimapCtx.stroke();
+}
+
+function updateMinimapBg() {
+    var scaleX = 100 / (MAXWIDTH * 2);
+    var scaleY = 100 / (MAXHEIGHT * 2);
+    minimapBgCtx.clearRect(0, 0, minimapCtx.canvas.width, minimapCtx.canvas.height);
+    for (var i = 0; i < canvas.getObjects().length; i++) {
+        if (canvas.item(i).objType === 'icon' || canvas.item(i).objType === 'shape') {
+            minimapBgCtx.fillRect((MAXWIDTH + canvas.item(i).getLeft()) * scaleX, (MAXHEIGHT + canvas.item(i).getTop()) * scaleY, 2, 2);
+        }
+    }
+}
+
 function zoomIn() {
-    offsetX = offsetX + ((canvas.width - (canvas.width * 0.90))/2) / canvas.getZoom();
-    offsetY = offsetY - ((canvas.height - (canvas.height * 0.90))/2) / canvas.getZoom(); 
-    canvas.zoomToPoint(new fabric.Point(canvas.width / 2, canvas.height / 2), canvas.getZoom() / 0.90);
-    background.zoomToPoint(new fabric.Point(background.width / 2, background.height / 2), background.getZoom() / 0.90);
-    settings.x = offsetX;
-    settings.y = offsetY;
+    if (canvas.getZoom() > 2.0)
+        return;
+    console.log(canvas.getZoom());
+    canvas.zoomToPoint(new fabric.Point(canvas.width / 2, canvas.height / 2), (canvas.getZoom() * 1.1).round(2));
+    settings.x = Math.round(canvas.viewportTransform[4]);
+    settings.y = Math.round(canvas.viewportTransform[5]);
     settings.zoom = canvas.getZoom();
+    updateMinimap();
     updateSettings();
 }
 
 function zoomOut() {
-    offsetX = offsetX + ((canvas.width - (canvas.width * 1.10))/2) / canvas.getZoom();
-    offsetY = offsetY - ((canvas.height - (canvas.height * 1.10))/2) / canvas.getZoom(); 
-    canvas.zoomToPoint(new fabric.Point(canvas.width / 2, canvas.height / 2), canvas.getZoom() / 1.1);
-    background.zoomToPoint(new fabric.Point(background.width / 2, background.height / 2), background.getZoom() / 1.1);
+    if (canvas.getZoom() < 0.6)
+        return;
+    canvas.zoomToPoint(new fabric.Point(canvas.width / 2, canvas.height / 2), (canvas.getZoom() / 1.1).round(2));
+    settings.x = Math.round(canvas.viewportTransform[4]);
+    settings.y = Math.round(canvas.viewportTransform[5]);
     settings.zoom = canvas.getZoom();
-    settings.x = offsetX;
-    settings.y = offsetY;
     updateSettings();
+    var deltaX = 0;
+    var deltaY = 0;
+    var zoom = canvas.getZoom();
+    if (canvas.viewportTransform[4] > MAXWIDTH * zoom)
+        deltaX = Math.round(MAXWIDTH * zoom - canvas.viewportTransform[4]);
+    else if (canvas.viewportTransform[4] - canvas.width < -MAXWIDTH * zoom)
+        deltaX = Math.round(-MAXWIDTH * zoom - canvas.viewportTransform[4] + canvas.width);
+    if (canvas.viewportTransform[5] > MAXHEIGHT * zoom)
+        deltaY = Math.round(MAXHEIGHT * zoom - canvas.viewportTransform[5]);
+    else if (canvas.viewportTransform[5] - canvas.height < -MAXHEIGHT * zoom)
+        deltaY = Math.round(-MAXHEIGHT * zoom - canvas.viewportTransform[5] + canvas.height);
+    if (deltaX !== 0 || deltaY !== 0)
+        canvas.relativePan({ x: deltaX, y: deltaY});
+    updateMinimap();
 }
 
 function getDate() {
@@ -712,26 +792,37 @@ function getDate() {
     return date.getFullYear() + '-' + addZero(date.getMonth()+1) + '-' + addZero(date.getDate()) + ' ' + addZero(date.getHours()) + ':' + addZero(date.getMinutes()) + ':' + addZero(date.getSeconds()) + '.' + date.getMilliseconds();
 }
 
+function getRoleSelect() {
+    roleSelect.sort(function(a, b) {
+        return a.name.localeCompare(b.name);
+    });
+    var roles = {};
+    for (var i = 0; i < roleSelect.length; i++) {
+        roles[roleSelect[i].id] = roleSelect[i].name;
+    }
+    return roles;
+}
+
 function getUserSelect() {
     userSelect.sort(function(a, b) {
         return a.username.localeCompare(b.name);
     });
-    var userString = '';
+    var user = {};
     for (var i = 0; i < userSelect.length; i++) {
-        userString += userSelect[i].id + ':' + userSelect[i].username + ';';
+        user[userSelect[i].id] = userSelect[i].username;
     }
-    return userString.substr(0, userString.length - 1)
+    return user;
 }
 
 function getObjectSelect() {
     objectSelect.sort(function(a, b) {
         return a.name.localeCompare(b.name);
     });
-    var objString = '';
+    var obj = {};
     for (var i = 0; i < objectSelect.length; i++) {
-        objString += objectSelect[i].id + ':' + objectSelect[i].name + ';';
+        obj[objectSelect[i].id] = objectSelect[i].name;
     }
-    return objString.substr(0, objString.length - 1);
+    return obj;
 }
 
 function getOpnoteSubGridData(id) {
@@ -758,6 +849,12 @@ function dateStringToEpoch(value) {
     return(d.getTime());
 }
 
+// temp
+//canvas.add(new fabric.Line([-1950,-1950,1950,-1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
+//canvas.add(new fabric.Line([-1950,-1950,-1950,1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
+//canvas.add(new fabric.Line([1950,-1950,1950,1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
+//canvas.add(new fabric.Line([1950,1950,-1950,1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
+
 function startPan(event) {
     if (event.button != 2) {
         return;
@@ -769,17 +866,26 @@ function startPan(event) {
             y = event.screenY;
         if (x - x0 != 0 || y - y0 != 0)
         {
-            offsetX -= (x - x0) / canvas.getZoom();
-            offsetY += (y - y0) / canvas.getZoom();
-            canvas.relativePan({ x: x - x0, y: y - y0 });
-            //background.relativePan({ x: x - x0, y: y - y0 });
+            var deltaX = x - x0;
+            var deltaY = y - y0;
+            var zoom = canvas.getZoom();
+            if (canvas.viewportTransform[4] + deltaX > MAXWIDTH * zoom)
+                deltaX = Math.round(MAXWIDTH * zoom - canvas.viewportTransform[4]);
+            else if (canvas.viewportTransform[4] - canvas.width + deltaX < -MAXWIDTH * zoom)
+                deltaX = Math.round(-MAXWIDTH * zoom - canvas.viewportTransform[4] + canvas.width);
+            if (canvas.viewportTransform[5] + deltaY > MAXHEIGHT * zoom)
+                deltaY = Math.round(MAXHEIGHT * zoom - canvas.viewportTransform[5]);
+            else if (canvas.viewportTransform[5] - canvas.height + deltaY < -MAXHEIGHT * zoom)
+                deltaY = Math.round(-MAXHEIGHT * zoom - canvas.viewportTransform[5] + canvas.height);
+            canvas.relativePan({ x: deltaX, y: deltaY});
             x0 = x;
             y0 = y;
+            settings.x = Math.round(canvas.viewportTransform[4]);
+            settings.y = Math.round(canvas.viewportTransform[5]);
+            updateMinimap();
         }
     }
     function stopPan(event) {
-        settings.x = Math.round(offsetX);
-        settings.y = Math.round(offsetY);
         updateSettings();
         $(window).off('mousemove', continuePan);
         $(window).off('mouseup', stopPan);
@@ -789,9 +895,27 @@ function startPan(event) {
     $(window).contextmenu(cancelMenu);
 };
 
+function msgHandler() {
+    pendingMsg[msgId] = setTimeout(function() {
+        for (m in pendingMsg) {
+            clearTimeout(pendingMsg[m]);
+        }
+        canvas.clear();
+        canvas.renderAll();
+        $('#modal-close').hide();
+        $('#modal-header').html('Attention!');
+        $('#modal-body').html('<p>Connection lost! Please refresh the page to continue!</p>');
+        $('#modal-footer').html('');
+        $('#modal-content').removeAttr('style');
+        $('#modal-content').removeClass('modal-details');
+        $('#modal').removeData('bs.modal').modal({backdrop: 'static', keyboard: false});
+    }, 30000);
+    return msgId++; 
+}
+
 function newNote() {
     bootbox.prompt('Note name?', function(name) {
-        diagram.send(JSON.stringify({act: 'insert_note', arg: {name: name}}));
+        diagram.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
     });
 }
 
@@ -1032,24 +1156,23 @@ function insertObject() {
         var center = new fabric.Point(canvas.width / 2, canvas.height / 2);
         lastFillColor = $('#propFillColor').val();
         lastStrokeColor = $('#propStrokeColor').val();
-        diagram.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom() + offsetX), y: Math.round(center.y / canvas.getZoom() - offsetY), z: canvas.getObjects().length}})); 
+        diagram.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom()) - settings.x, y: Math.round(center.y / canvas.getZoom() - settings.y), z: canvas.getObjects().length}, msgId: msgHandler()})); 
     }
 }
 
 function sendChatMessage(msg, channel) {
-    diagram.send(JSON.stringify({act: 'insert_chat', arg: {channel: channel, text: msg}}));
+    diagram.send(JSON.stringify({act: 'insert_chat', arg: {channel: channel, text: msg}, msgId: msgHandler()}));
 }
 
 // move objects up / down on canvas
-
 function moveToZ(o, z) {
     if (o) {
         if (o.objType === 'link')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, z: z}}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, z: z}, msgId: msgHandler()}));
         else if (o.objType === 'icon')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.scaleX, scale_y: o.scaleY, rot: o.angle}}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.scaleX, scale_y: o.scaleY, rot: o.angle}, msgId: msgHandler()}));
         else if (o.objType === 'shape')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.width, scale_y: o.height, rot: o.angle}}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.width, scale_y: o.height, rot: o.angle}, msgId: msgHandler()}));
     }
 }
 
@@ -1106,9 +1229,6 @@ function updatePropName(name) {
                 break;
             }
         }
-        objectSelect.sort(function(a, b) {
-            return a.name.localeCompare(b.name);
-        });
         canvas.renderAll();
         changeObject(o);
         $('#events2').jqGrid('setColProp', 'dest_object', { editoptions: { value: getObjectSelect() }});
@@ -1154,9 +1274,10 @@ function changeObject(o) {
             tempObj.name = o.children[i].text;
         }
     }
-    diagram.send(JSON.stringify({act: 'change_object', arg: tempObj}));
+    diagram.send(JSON.stringify({act: 'change_object', arg: tempObj, msgId: msgHandler()}));
 }
 
+// bottom table toggle
 function toggleTable(mode) {
     $('#' + activeTable + 'Tab').removeClass('active-horiz-tab');
     $('#' + mode + 'Tab').addClass('active-horiz-tab');
@@ -1288,7 +1409,7 @@ function timestamp(str){
     var date = new Date(str);
     return (date.getFullYear() + '-' + addZero(date.getMonth()+1) + '-' + addZero(date.getDate()) + ' ' + addZero(date.getHours()) + ':' + addZero(date.getMinutes()) + ':' + addZero(date.getSeconds()) + '.' + date.getMilliseconds());
 }
-
+//start sharedb tasks
 function startTasks() {
     console.log('starting tasks');
     if (shareDBConnection.state === 'connected') {
@@ -1334,16 +1455,28 @@ function startTasks() {
     }
 }
 
+//download diagram to png
 function downloadDiagram(link) {
     link.href = canvas.toDataURL('png');
     link.download = 'diagram.png';
 }
 
+//download opnotes to csv
 function downloadOpnotes() {
-    JSONToCSVConvertor($('#opnotes2').getGridParam('data'), 'opnotes.csv');
+    var data = $('#opnotes2').getGridParam('data');
+    for (var r = 0; r < data.length; r++) {
+        data[r].event_time = epochToDateString(data[r].event_time);
+    }
+    JSONToCSVConvertor(data, 'opnotes.csv');
 }
 
+//download events to csv
 function downloadEvents() {
+    var data = $('#events2').getGridParam('data');
+    for (var r = 0; r < data.length; r++) {
+        data[r].event_time = epochToDateString(data[r].event_time);
+        data[r].discovery_time = epochToDateString(data[r].discovery_time);
+    }
     JSONToCSVConvertor($('#events2').getGridParam('data'), 'opnotes.csv');
 }
 
@@ -1428,17 +1561,20 @@ function setSlider(i, value) {
     dateSlider.noUiSlider.set(r);
 }
 
+function resizeTables() {
+    $("#events2").setGridWidth(Math.round($('#tables').width()-5));
+    $("#opnotes2").setGridWidth($('#tables').width()-5);
+    $("#users").setGridWidth($('#tables').width()-5);
+}
+
 function resizeCanvas() {
     if (canvas.getHeight() != $('#diagram').height()) {
         canvas.setHeight($('#diagram').height());
-        background.setHeight($('#diagram').height());
     }
     if (canvas.getWidth() != $('#diagram').width()) {
         canvas.setWidth($('#diagram').width());
-        background.setWidth($('#diagram').width());
-        $("#events2").setGridWidth($('#tables').width()-5);
-        $("#opnotes2").setGridWidth($('#tables').width()-5);
     }
+    updateMinimap();
 }
 
 function startTime() {
@@ -1470,7 +1606,7 @@ function deleteObjectConfirm() {
 
 function deleteObject() {
     if (canvas.getActiveObject().id) {
-        diagram.send(JSON.stringify({act: 'delete_object', arg: {id:canvas.getActiveObject().id, type:canvas.getActiveObject().objType}}));
+        diagram.send(JSON.stringify({act: 'delete_object', arg: {id:canvas.getActiveObject().id, type:canvas.getActiveObject().objType}, msgId: msgHandler()}));
     }
 }
 
@@ -1484,7 +1620,7 @@ function deleteRowConfirm(type, table, id) {
 }
 
 function deleteRow(type, table, id) {
-    diagram.send(JSON.stringify({act: 'delete_' + type, arg: {id: id}}));
+    diagram.send(JSON.stringify({act: 'delete_' + type, arg: {id: id}, msgId: msgHandler()}));
     $(table).jqGrid('delRowData', id);
 }
 
@@ -1507,7 +1643,7 @@ function saveRow(type, table, id) {
         data.event_time = dateStringToEpoch(data.event_time);
     if (data.discovery_time)
         data.discovery_time = dateStringToEpoch(data.discovery_time);
-    diagram.send(JSON.stringify({act: act, arg: data}));
+    diagram.send(JSON.stringify({act: act, arg: data, msgId: msgHandler()}));
 }
 
 $(document).ready(function() {
@@ -1526,6 +1662,8 @@ $(document).ready(function() {
     wsdb.onopen = function() {
         wsdb.send(JSON.stringify({act: 'stream', arg: ''}));
     };
+
+    // ---------------------------- MAIN LOADER ----------------------------------
     diagram.onopen = function() {
         $('#modal').modal('hide');
         $('#modal-title').text('Please wait...!');
@@ -1534,24 +1672,30 @@ $(document).ready(function() {
         $('#modal').modal('show')
         setTimeout(function() {
             console.log('connect');
-            diagram.send(JSON.stringify({act:'join', arg: {mission: mission}}));
+            diagram.send(JSON.stringify({act:'join', arg: {mission: mission}, msgId: msgHandler()}));
+            console.log('get roles');
+            diagram.send(JSON.stringify({act:'get_roles', arg: {}, msgId: msgHandler()}));
             console.log('get users list');
-            diagram.send(JSON.stringify({act:'get_users', arg: {}}));
+            diagram.send(JSON.stringify({act:'get_users', arg: {}, msgId: msgHandler()}));
             console.log('get objects');
-            diagram.send(JSON.stringify({act:'get_objects', arg: {}}));
+            diagram.send(JSON.stringify({act:'get_objects', arg: {}, msgId: msgHandler()}));
             console.log('get events');
-            diagram.send(JSON.stringify({act:'get_events', arg: {}}));
+            diagram.send(JSON.stringify({act:'get_events', arg: {}, msgId: msgHandler()}));
             console.log('get opnotes');
-            diagram.send(JSON.stringify({act:'get_opnotes', arg: {}}));
+            diagram.send(JSON.stringify({act:'get_opnotes', arg: {}, msgId: msgHandler()}));
             console.log('get chat history');
-            diagram.send(JSON.stringify({act:'get_all_chats', arg: {}}));
+            diagram.send(JSON.stringify({act:'get_all_chats', arg: {}, msgId: msgHandler()}));
             console.log('get notes');
-            diagram.send(JSON.stringify({act:'get_notes', arg: {}}));
+            diagram.send(JSON.stringify({act:'get_notes', arg: {}, msgId: msgHandler()}));
         }, 100);
     };
     diagram.onmessage = function(msg) {
         msg = JSON.parse(msg.data);
         switch(msg.act) {
+            case 'ack':
+                clearTimeout(pendingMsg[msg.arg]);
+                delete pendingMsg[msg.arg];
+                break;
             case 'bulk_chat':
                 addChatMessage(msg.arg, true);
                 break;
@@ -1586,9 +1730,6 @@ $(document).ready(function() {
                         getIcon(msg.arg[o].image);
                     }
                 }
-                objectSelect.sort(function(a, b) {
-                    return a.name.localeCompare(b.name);
-                });
                 $('#events2').jqGrid('setColProp', 'dest_object', { editoptions: { value: getObjectSelect() }});
                 $('#events2').jqGrid('setColProp', 'source_object', { editoptions: { value: getObjectSelect() }});
                 checkIfShapesCached(msg.arg);
@@ -1613,9 +1754,21 @@ $(document).ready(function() {
                 });
                 break;
             case 'all_users':
+                var userTableData = [];
+                for (var user in msg.arg) {
+                    userTableData.push(msg.arg[user]);
+                }
+                $('#users').jqGrid('setGridParam', {
+                    datatype: 'local',
+                    data: userTableData
+                }).trigger("reloadGrid");
                 userSelect = userSelect.concat(msg.arg);
                 $('#events2').jqGrid('setColProp', 'assignment', { editoptions: { value: getUserSelect() }});
                 break; 
+            case 'all_roles':
+                roleSelect = roleSelect.concat(msg.arg);
+                $('#users').jqGrid('setColProp', 'role', { editoptions: { value: getRoleSelect() }});
+                break;
             case 'all_opnotes':
                 var opnoteTableData = [];
                 for (var evt in msg.arg) {
@@ -1702,6 +1855,9 @@ $(document).ready(function() {
                                     }
                                     obj.setCoords();
                                     canvas.renderAll();
+                                }, 
+                                onComplete: function() {
+                                    updateMinimapBg();
                                 }
                             });
                         }
@@ -1769,12 +1925,10 @@ $(document).ready(function() {
                 addObjectToCanvas(o, false);
                 if (o.type !== 'link') {
                     objectSelect.push({id:o.id, name:o.name.split('\n')[0]});
-                    objectSelect.sort(function(a, b) {
-                        return a.name.localeCompare(b.name);
-                    });
                 }
                 $('#events2').jqGrid('setColProp', 'dest_object', { editoptions: { value: getObjectSelect() }});
                 $('#events2').jqGrid('setColProp', 'source_object', { editoptions: { value: getObjectSelect() }});
+                updateMinimapBg();
                 break;
             case 'delete_object':
                 var id = msg.arg;
@@ -1792,6 +1946,7 @@ $(document).ready(function() {
                         break;
                     }
                 }
+                updateMinimapBg();
                 canvas.renderAll();
                 break;
         }
@@ -1848,15 +2003,6 @@ $(document).ready(function() {
             }
         });
     });
-
-    // ---------------------------- DIAGRAM ----------------------------------
-    for(var x=1;x<(MAXWIDTH/gridsize);x++)
-    {
-        background.add(new fabric.Line([gridsize*x - MAXWIDTH/2, 0 - MAXHEIGHT/2, gridsize*x - MAXWIDTH/2, MAXHEIGHT/2],{ stroke: "#989898", strokeWidth: 0.5, selectable:false}));
-         //, strokeDashArray: [2, 2]}));
-        background.add(new fabric.Line([0 - MAXWIDTH/2, gridsize*x - MAXHEIGHT/2, MAXWIDTH/2, gridsize*x - MAXHEIGHT/2],{ stroke: "#989898", strokeWidth: 0.5, selectable:false}));
-        //, strokeDashArray: [2, 2]}));
-    }
 
     // ---------------------------- SLIDER ----------------------------------
     dateSlider = document.getElementById('slider');
@@ -1985,24 +2131,28 @@ $(document).ready(function() {
         }
         clickComplete = true;
     });
+    // ---------------------------- OPNOTES TABLE ----------------------------------
     $("#opnotes2").jqGrid({
         datatype: 'local',
         cellsubmit: 'clientArray',
         editurl: 'clientArray',
         data: [],
-        height: 300,
+        height: 280,
+        rowNum: 9999,
         cellEdit: true,
         sortable: true,
         pager: '#opnotesPager',
-        rowNum: 9999,
         pgbuttons: false,
-        pgtext: null,
-        viewrecords: false,
         sortname: 'event_time',
         sortorder: 'asc',
+        pgtext: null,
+        viewrecords: false,
+        shrinkToFit: true,
+        autowidth: true,
+        toolbar: [true, 'top'],
         colModel: [
-            { label: 'Id', name: 'id', hidden: true, key: true, editable: false },
-            { label: ' ', template: 'actions', formatter: function(cell, options, row) {
+            { label: 'Id', name: 'id', hidden: true, width: 0, fixed: 0, key: true, editable: false },
+            { label: ' ', template: 'actions', fixed: true, formatter: function(cell, options, row) {
                     var buttons = '<div title="Delete row" style="float: left;';
                     if (!opnotes_del)
                         buttons += ' display: none;';
@@ -2013,14 +2163,14 @@ $(document).ready(function() {
                     buttons +=  '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel ui-inline-cancel-cell" id="jCancelButton_' + options.rowId + '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel" id="btn_cancel_' + options.rowId + '" onclick="$(\'#opnotes2\').restoreCell(lastselection.iRow, lastselection.iCol);" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-cancel"></span></div>';
                     return buttons;
                 },
-                fixed: true,
                 width: 45,
+                hidden: !opnotes_rw,
                 formatoptions: {
                     keys: true,
                 }
             },
-            { label: 'Id', name: 'event', width: 40, fixed: true, editable: true },
-            { label: 'Event Time', name: 'event_time', width: 180, fixed: true, resizable: false, editable: true, formatter: epochToDateString, editoptions: {
+            { label: 'Id', name: 'event', width: 40, fixed: true, editable: opnotes_rw },
+            { label: 'Event Time', name: 'event_time', width: 180, fixed: true, resizable: false, editable: opnotes_rw, formatter: epochToDateString, editoptions: {
                 dataInit: function (element) {
                     $(element).datetimepicker({
                         dateFormat: "yy-mm-dd",
@@ -2044,9 +2194,9 @@ $(document).ready(function() {
                     newformat: 'yy-mm-dd HH:mm:ss.l'
                 }
             }},
-            { label: 'Host/Device', name: 'source_object', width: 100, fixed: true, editable: true },
-            { label: 'Tool', name: 'tool', width: 100, fixed: true, editable: true },
-            { label: 'Action', name: 'action', edittype: 'textarea', editable: true, cellattr: function (rowId, tv, rawObject, cm, rdata) {
+            { label: 'Host/Device', name: 'source_object', width: 100, fixed: true, editable: opnotes_rw },
+            { label: 'Tool', name: 'tool', width: 100, fixed: true, editable: opnotes_rw },
+            { label: 'Action', name: 'action', width: 200, fixed: false, edittype: 'textarea', editable: opnotes_rw, cellattr: function (rowId, tv, rawObject, cm, rdata) {
                 return 'style="white-space: pre-wrap;"';
             }},
             { label: 'Analyst', name: 'analyst', width: 100, fixed: true, editable: false },
@@ -2080,7 +2230,7 @@ $(document).ready(function() {
                 data.event_time = dateStringToEpoch(data.event_time);
             delete data.actions;
             delete data.undefined;
-            diagram.send(JSON.stringify({act: 'update_opnote', arg: data}));
+            diagram.send(JSON.stringify({act: 'update_opnote', arg: data, msgId: msgHandler()}));
         },
         afterEditCell: function(id, name, val, iRow, iCol) {
             // this handles clicking outside a cell while editing... a janky blur
@@ -2124,7 +2274,7 @@ $(document).ready(function() {
                                 $('#opnotes2').jqGrid('restoreRow', id, function(){});
                                 data.event_time = dateStringToEpoch(data.event_time);
                                 delete data.actions;
-                                diagram.send(JSON.stringify({act: 'insert_opnote', arg: data}));
+                                diagram.send(JSON.stringify({act: 'insert_opnote', arg: data, msgId: msgHandler()}));
                                 $('#opnotes2').jqGrid('resetSelection');
                             },
                             oneditfunc: function(id, cn, val, iRow, iCol) {
@@ -2147,6 +2297,39 @@ $(document).ready(function() {
             }
         });
     }
+    $('#t_opnotes2').append($("<div><input id=\"opnotesSearchText\" type=\"text\"></input>&nbsp;" +
+        "<button id=\"opnotesSearch\" type=\"button\">Search</button></div>"));
+    $("#opnotesSearchText").keypress(function (e) {
+        var key = e.charCode || e.keyCode || 0;
+        if (key === $.ui.keyCode.ENTER) {
+            $("#opnotesSearch").click();
+        }
+    });
+    $("#opnotesSearch").button({}).click(function () {
+        var $grid = $('#opnotes2');
+        var rules = [], i, cm, postData = $grid.jqGrid("getGridParam", "postData"),
+            colModel = $grid.jqGrid("getGridParam", "colModel"),
+            searchText = $("#opnotesSearchText").val(),
+            l = colModel.length;
+        for (i = 0; i < l; i++) {
+            cm = colModel[i];
+            if (cm.search !== false && (cm.stype === undefined || cm.stype === "text")) {
+                rules.push({
+                    field: cm.name,
+                    op: "cn",
+                    data: searchText
+                });
+            }
+        }
+        postData.filters = JSON.stringify({
+            groupOp: "OR",
+            rules: rules
+        });
+        $grid.jqGrid("setGridParam", { search: true });
+        $grid.trigger("reloadGrid", [{page: 1, current: true}]);
+        return false;
+    });
+    // ---------------------------- EVENTS TABLE ----------------------------------
     $("#events2").jqGrid({
         datatype: 'local',
         cellsubmit: 'clientArray',
@@ -2160,6 +2343,8 @@ $(document).ready(function() {
         pgbuttons: false,
         sortname: 'event_time',
         sortorder: 'asc',
+        shrinkToFit: true,
+        autowidth: true,
         pgtext: null,
         viewrecords: false,
         toolbar: [true, "top"],
@@ -2175,7 +2360,7 @@ $(document).ready(function() {
                     { label: 'Event Time', name: 'event_time', width: 180, fixed: true, editable: false, formatter: epochToDateString },
                     { label: 'Host/Device', name: 'source_object', editable: false },
                     { label: 'Tool', name: 'tool', editable: false },
-                    { label: 'Action', name: 'action', editable: false, cellattr: function (rowId, tv, rawObject, cm, rdata) {
+                    { label: 'Action', name: 'action', width: 250, editable: false, cellattr: function (rowId, tv, rawObject, cm, rdata) {
                         return 'style="white-space: pre-wrap;"';
                     }},
                     { label: 'Analyst', name: 'analyst', width: 100, fixed: true, editable: false },
@@ -2194,13 +2379,14 @@ $(document).ready(function() {
                     buttons +=  '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel ui-inline-cancel-cell" id="jCancelButton_' + options.rowId + '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel" id="btn_cancel_' + options.rowId + '" onclick="$(\'#events2\').restoreCell(lastselection.iRow, lastselection.iCol);" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-cancel"></span></div>';
                     return buttons;
                 },
-                width: 45,
+                width: 50,
+                hidden: !events_rw,
                 formatoptions: {
                     keys: true,
                 }
             },
             { label: 'Id', name: 'id', width: 40, fixed: true, key: true, editable: false },
-            { label: 'Event Time', name: 'event_time', width: 180, fixed: true, resizable: false, editable: true, formatter: epochToDateString, editoptions: {
+            { label: 'Event Time', name: 'event_time', width: 180, editable: events_rw, formatter: epochToDateString, editoptions: {
                 dataInit: function (element) {
                     $(element).datetimepicker({
                         dateFormat: "yy-mm-dd",
@@ -2223,7 +2409,7 @@ $(document).ready(function() {
                     newformat: 'yy-mm-dd HH:mm:ss.l'
                 }
             }},
-            { label: 'Discovery Time', name: 'discovery_time', width: 180, fixed: true, editable: true, formatter: epochToDateString, editoptions: {
+            { label: 'Discovery Time', name: 'discovery_time', width: 180, editable: events_rw, formatter: epochToDateString, editoptions: {
                 dataInit: function (element) {
                     $(element).datetimepicker({
                         dateFormat: "yy-mm-dd",
@@ -2246,22 +2432,22 @@ $(document).ready(function() {
                     newformat: 'yy-mm-dd HH:mm:ss.l'
                 }
             }},
-            { label: 'Source', name: 'source_object', width: 100, editable: true, formatter: 'select', edittype: 'select', editoptions: {
+            { label: 'Source', name: 'source_object', width: 80, editable: events_rw, formatter: 'select', edittype: 'select', editoptions: {
                 value: getObjectSelect()
             }},
-            { label: 'SPort', name: 'source_port', width: 60, fixed: true, editable: true },
-            { label: 'Destination', name: 'dest_object', width: 100, editable: true, formatter: 'select', edittype: 'select', editoptions: {
+            { label: 'SPort', name: 'source_port', width: 60, editable: events_rw },
+            { label: 'Destination', name: 'dest_object', width: 80, editable: events_rw, formatter: 'select', edittype: 'select', editoptions: {
                 value: getObjectSelect()
             }},
-            { label: 'DPort', name: 'dest_port', width: 60, fixed: true, editable: true },
-            { label: 'Event Type', name: 'event_type', width: 150, editable: true },
-            { label: 'Event Description', name: 'short_desc', width: 200, edittype: 'textarea', editable: true, cellattr: function (rowId, tv, rawObject, cm, rdata) {
+            { label: 'DPort', name: 'dest_port', width: 60, editable: events_rw },
+            { label: 'Event Type', name: 'event_type', width: 150, editable: events_rw },
+            { label: 'Event Description', name: 'short_desc', width: 200, edittype: 'textarea', editable: events_rw, cellattr: function (rowId, tv, rawObject, cm, rdata) {
                 return 'style="white-space: pre-wrap;"';
             }},
-            { label: 'Assignment', name: 'assignment', width: 100, editable: true, formatter: 'select', edittype: 'select', editoptions: {
+            { label: 'Assignment', name: 'assignment', width: 100, editable: events_rw, formatter: 'select', edittype: 'select', editoptions: {
                 value: getUserSelect()
             }},
-            { label: 'Analyst', name: 'analyst', width: 100, fixed: true, editable: false },
+            { label: 'Analyst', name: 'analyst', width: 100, editable: false },
         ],
         onSelectRow: function() {
             return false;
@@ -2293,7 +2479,7 @@ $(document).ready(function() {
             if (data.discovery_time)
                 data.discovery_time = dateStringToEpoch(data.discovery_time);
             delete data.actions;
-            diagram.send(JSON.stringify({act: 'update_event', arg: data}));
+            diagram.send(JSON.stringify({act: 'update_event', arg: data, msgId: msgHandler()}));
         },
         afterEditCell: function(id, name, val, iRow, iCol) {
             // this handles clicking outside a cell while editing... a janky blur
@@ -2311,12 +2497,14 @@ $(document).ready(function() {
             $('#events2').jqGrid('resetSelection');
         }
     });
+    //events pager
     $('#events2').jqGrid('navGrid', '#eventsPager', {
         add: false,
         edit: false,
         del: false,
         refresh: false
     })
+    //events buttons
     if (events_rw) {
         $('#events2').jqGrid('navGrid').jqGrid('navButtonAdd', '#eventsPager', {
             position:"last",
@@ -2337,7 +2525,7 @@ $(document).ready(function() {
                                 data.event_time = dateStringToEpoch(data.event_time);
                                 data.discovery_time = dateStringToEpoch(data.discovery_time);
                                 delete data.actions;
-                                diagram.send(JSON.stringify({act: 'insert_event', arg: data}));
+                                diagram.send(JSON.stringify({act: 'insert_event', arg: data, msgId: msgHandler()}));
                                 $('#events2').jqGrid('resetSelection');
                             },
                             oneditfunc: function(id) {
@@ -2360,6 +2548,7 @@ $(document).ready(function() {
             }
         });
     }
+    //events search
     $('#t_events2').append($("<div><input id=\"globalSearchText\" type=\"text\"></input>&nbsp;" +
         "<button id=\"globalSearch\" type=\"button\">Search</button></div>"));
     $("#globalSearchText").keypress(function (e) {
@@ -2392,6 +2581,72 @@ $(document).ready(function() {
         $grid.trigger("reloadGrid", [{page: 1, current: true}]);
         return false;
     });
+    // ---------------------------- USERS TABLE ----------------------------------
+    $("#users").jqGrid({
+        datatype: 'local',
+        cellsubmit: 'clientArray',
+        editurl: 'clientArray',
+        data: [],
+        height: 350,
+        rowNum: 9999,
+        cellEdit: true,
+        pager: '#usersPager',
+        pgbuttons: false,
+        sortname: 'username',
+        sortorder: 'asc',
+        pgtext: null,
+        viewrecords: false,
+        colModel: [
+            { label: 'Id', name: 'id', width: 40, fixed: true, key: true, editable: false },
+            { label: 'Username', name: 'username', width: 150, fixed: true, editable: false },
+            { label: 'Role', name: 'role', width: 100, editable: users_rw, formatter: 'select', edittype: 'select', editoptions: {
+                value: getRoleSelect()
+            }},
+            { label: 'Permissions', name: 'permissions', width: 200, editable: users_rw, edittype: 'select', formatter: 'select', editoptions: {
+                    value: {none: 'None', all:'All', manage_users:'Manage Users', modify_diagram: 'Modify Diagram', create_events: 'Create Events', delete_events: 'Delete Events', modify_notes: 'Modify Notes', create_opnotes: 'Create Opnotes', delete_opnotes: 'Delete Opnotes', modify_tasks: 'Modify Tasks', modify_details: 'Modify Details', modify_files: 'Modify Files'},
+                    multiple: true,
+                    size: 10
+                }
+            }
+        ],
+        onSelectRow: function() {
+            return false;
+        },
+        beforeSelectRow: function(rowid, e) {
+            return false;
+        },
+        beforeEditCell: function (id, cn, val, iRow, iCol) {
+            lastselection = {id: id, iRow: iRow, iCol: iCol};
+        },
+        beforeSaveCell: function (options, col, value) {
+            $('#users').jqGrid('resetSelection');
+            lastselection.id = null;
+            var data = $('#users').getRowData(options);
+            data[col] = value;
+            delete data.actions;
+            diagram.send(JSON.stringify({act: 'update_user', arg: data, msgId: msgHandler()}));
+        },
+        afterEditCell: function(id, name, val, iRow, iCol) {
+            // this handles clicking outside a cell while editing... a janky blur
+            clickComplete = false;
+            cellEditRow = $('#' + id);
+            cellEdit = function() {
+                $('#users').saveCell(iRow,iCol);
+                cellEdit = null;
+            }
+        },
+        afterRestoreCell: function (options) {
+            $('#users').jqGrid('resetSelection');
+        }
+    });
+    //users pager
+    $('#users').jqGrid('navGrid', '#usersPager', {
+        add: false,
+        edit: false,
+        del: false,
+        refresh: false
+    })
+
     // ---------------------------- CHAT ----------------------------------
     $('.channel').click(function(e) {
         var c = e.target.id.split('-')[1];
@@ -2424,6 +2679,7 @@ $(document).ready(function() {
     });
     // reseize event to resize canvas and toolbars
     $('#diagram_jumbotron').on('resize', function(event, ui) {
+        resizeTables();
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(function() {
             settings[activeToolbar] = Math.round($('#toolbar-body').width());
@@ -2433,6 +2689,7 @@ $(document).ready(function() {
         }, 100);
     });
     window.addEventListener('resize', function() {
+        resizeTables();
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(function() {
             resizeCanvas();
@@ -2447,12 +2704,14 @@ $(document).ready(function() {
     });
     // load settings from cookie
     loadSettings();
+    resizeTables();
     resizeCanvas();
 });
 
+// publically accessible functions
 module.exports = {
     deleteObject: deleteObject,
     saveRow: saveRow,
     deleteRow: deleteRow,
-    deleteRowConfirm: deleteRowConfirm
+    deleteRowConfirm: deleteRowConfirm,
 };

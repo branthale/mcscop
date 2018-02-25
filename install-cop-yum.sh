@@ -1,5 +1,5 @@
 #!/bin/sh
-if [ $EUID -ne 0 ] || [ "$USER" == "root" ]; then
+if [ $EUID -ne 0 ] || [ "$SUDO_USER" == "root" ]; then
    echo "[!] This script must be run with sudo from the user that will run the cop."
    exit 1
 fi
@@ -18,7 +18,7 @@ while true; do
 done
 if [ $ans -eq 1 ]; then
     cp mongodb-org-3.6.repo /etc/yum.repos.d
-    yum -y install curl mariadb-server mariadb
+    yum -y install curl mariadb-server mariadb mongodb-org
     curl -sL https://rpm.nodesource.com/setup_8.x | bash -
     yum -y install nodejs
     systemctl enable mariadb.service
@@ -52,8 +52,8 @@ while true; do
 done
 if [ $ans -eq 1 ]; then
     npm install -g pm2
-    env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u $USER --hp /home/$USER
-    su $USER -c "pm2 start app.js --name=MCSCOP; pm2 save"
+    env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u $SUDO_USER --hp /home/$SUDO_USER
+    su $SUDO_USER -c "pm2 start app.js --name=MCSCOP; pm2 save"
 else
     echo "[!] To run MCSCOP use: node app.js from the mcscop directory."
 fi

@@ -29,7 +29,6 @@ select {
 td a {
     text-decoration: none;
     border-bottom: 1px dashed #141414;
-
 }
 
 #windowPane {
@@ -69,6 +68,11 @@ button.pane-close {
 
 .simplecolorpicker {
     border: 1px solid #9d9d9d !important;
+    margin-right: 10px;
+}
+
+.myavatar {
+    float: left;
     margin-right: 10px;
 }
 
@@ -125,6 +129,23 @@ button.pane-close {
     text-decoration: underline;
 }
 
+#progressbar-container {
+  -webkit-box-sizing: border-box;
+     -moz-box-sizing: border-box;
+          box-sizing: border-box;
+    width: 100%;
+    position: absolute;
+    left: 0px;
+    bottom: 0px;
+    padding: 10px;
+}
+
+#progressbar {
+    width: 100%;
+    height: 25px;
+    text-align: center;
+}
+
 #globalSearchText {
     height: 23px;
 }
@@ -148,27 +169,14 @@ button.pane-close {
     vertical-align: middle;
 }
 
+.ui-jqgrid .selected-row, div.ui-jqgrid .selected-row td {
+    border-left: 0 none !important
+}
+
 .ui-progressbar .ui-progressbar-value {
     margin: 0px;
     background: #337ab7;
     color: #7f7f7f;
-}
-
-#progressbar-container {
-  -webkit-box-sizing: border-box;
-     -moz-box-sizing: border-box;
-          box-sizing: border-box;
-    width: 100%;
-    position: absolute;
-    left: 0px;
-    bottom: 0px;
-    padding: 10px;
-}
-
-#progressbar {
-    width: 100%;
-    height: 25px;
-    text-align: center;
 }
 
 .ui-icon {
@@ -235,6 +243,21 @@ button.pane-close {
     padding: 0px 0px 0px 4px;
 }
 
+.ui-jqgrid>.ui-jqgrid-view input, .ui-jqgrid>.ui-jqgrid-view textarea, .ui-jqgrid>.ui-jqgrid-view select {
+    font-size: 14px;
+}
+
+.ui-jqgrid .ui-jqgrid-bdiv {
+    overflow-y: scroll;
+}
+
+.ui-jqgrid {
+    padding: 1px;
+    margin-right: 5px;
+    margin-bottom: 7px;
+}
+
+
 .clockBar {
     width: 100%;
     background: #000;
@@ -264,32 +287,6 @@ button.pane-close {
     background: #385a91;
 }
 
-.ui-jqgrid>.ui-jqgrid-view input, .ui-jqgrid>.ui-jqgrid-view textarea, .ui-jqgrid>.ui-jqgrid-view select {
-    font-size: 14px;
-}
-
-.ui-jqgrid .ui-jqgrid-bdiv {
-    overflow-y: scroll;
-}
-
-.ui-jqgrid {
-    padding: 1px;
-    margin-right: 5px;
-    margin-bottom: 7px;
-}
-
-.jsgrid-header-cell, .jsgrid-cell {
-    padding: 3px;
-}
-
-.jsgrid-control-field {
-    width: 25px !important;
-}
-
-.jsgrid-grid-body {
-    border: none;
-}
-
 .navbar-nav > li > a {
     padding-top:5px !important; padding-bottom:5px !important;
 }
@@ -300,7 +297,6 @@ button.pane-close {
 }
 
 .droppable {
-    width: 100%;
 }
 
 #files, #notes {
@@ -310,7 +306,7 @@ button.pane-close {
 }
 
 #chat {
-    height: 400px;
+    height: 425px;
     width: 100%;
     border: 1px solid #7f7f7f;
 }
@@ -390,12 +386,12 @@ button.pane-close {
     overflow-y: scroll;
 }
 
-#opnotesForm, #toolsForm, #notesForm, #filesForm, #tasksForm {
+#toolsForm, #notesForm, #filesForm, #tasksForm {
     height: 100%;
     padding: 10px;
 }
 
-#notesForm, #opnotesForm {
+#notesForm {
     padding-bottom: 45px;
 }
 
@@ -542,6 +538,16 @@ button.pane-close {
     }
 }
 
+#minimap {
+    position: absolute;
+    bottom: 30px;
+    left: 5px;
+    width: 100px;
+    height: 100px;
+    background-color: white;
+    border: solid 1px #7f7f7f;
+}
+
 #zoom-buttons {
     position: absolute;
     bottom: 5px;
@@ -570,6 +576,7 @@ button.pane-close {
 }
 
 .btn-login {
+    margin-top: 20px;
     background-color: #080808;
     color: white;
 }
@@ -580,8 +587,15 @@ input[type="text"] {
     border-bottom-right-radius: 0;
 }
 
-input[type="password"] {
-    margin-bottom: 20px;
+.cp-form-control {
+    width: 300px;
+}
+
+.cp-form-group {
+    margin-bottom: 5px;
+}
+
+.input-password {
     border-top-left-radius: 0;
     border-top-right-radius: 0;
 }

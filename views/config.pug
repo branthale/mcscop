@@ -11,12 +11,29 @@ html
   body
     div.container
       include nav.pug
-      div.jumbotron
+      div.jumbotron#profileJumbotron
+        h2 Profile
+        div#userProfile
+          div.myavatar
+            img(id="myavatar_" + profile.user_id, src="images/avatars/" + profile.user_id + ".png", style="margin-top: 5px").droppable.avatar
+          div#profile
+            div#profileName <b>Name:</b> #{profile.name}
+            div#profileUsername <b>Username:</b> #{profile.username}
+            div#profilePermissions <b>System Permissions:</b> #{profile.permissions}
+            form 
+              div.form-group.cp-form-group
+                label New Password:
+                input(type='password')#cpNew.form-control.cp-form-control
+              div.form-group.cp-form-group
+                label Confirm:
+                input(type='password')#cpConfirm.form-control.cp-form-control
+              button#changePassword.btn.btn-primary Change Password
+      div.jumbotron#usersJumbotron(style='display: none;')
         h2 Users
         table#users
         div#usersPager
-      div.jumbotron
-        h2 Roles
+      div.jumbotron#rolesJumbotron(style='display: none;')
+        h2 Mission Roles
         table#roles
         div#rolesPager
 script var permissions = "#{permissions}".split(',');
