@@ -296,8 +296,8 @@ canvas.on('object:moving', function(options) {
     for (var i = 0; i < o.length; i++) {
         o[i].dirty = true;
         for (var j = 0; j < o[i].children.length; j++) {
-            o[i].children[j].setTop(tmod + o[i].getTop() + o[i].getHeight()/2);
-            o[i].children[j].setLeft(lmod + o[i].getLeft());
+            o[i].children[j].setTop(tmod + o[i].getTop() + o[i].getHeight());
+            o[i].children[j].setLeft(lmod + o[i].getLeft() + o[i].getWidth()/2);
         }
     }
 });
@@ -467,7 +467,7 @@ canvas.on('before:render', function(e) {
                     tempLinks[i].set({ 'x1': tempLinks[i].from.getCenterPoint().x, 'y1': tempLinks[i].from.getCenterPoint().y });
                     tempLinks[i].set({ 'x2': tempLinks[i].to.getCenterPoint().x, 'y2': tempLinks[i].to.getCenterPoint().y });
                 } else {
-                    tempLinks[i].set({top: tempLinks[i].dad.top, left: tempLinks[i].dad.left});
+                    tempLinks[i].set({top: tempLinks[i].dad.top - 7.5, left: tempLinks[i].dad.left - 7.5});
                 }
             }
         }
@@ -1032,8 +1032,8 @@ function addObjectToCanvas(o, selected) {
                     objType: o.type,
                     image: o.image,
                     name_val: o.name,
-                    originX: 'center',
-                    originY: 'center',
+                    originX: 'left',
+                    originY: 'top',
                     left: o.x,
                     top: o.y,
                     lockMovementX: !diagram_rw,
@@ -1070,8 +1070,8 @@ function addObjectToCanvas(o, selected) {
                     fill: '#000000',
                     fontSize: 12,
                     fontFamily: 'lato',
-                    left: o.x,
-                    top: o.y + (shape.getHeight()/2)
+                    left: o.x + shape.getWidth()/2,
+                    top: o.y + shape.getHeight()
                 });
                 shape.children = [name];
                 objectsLoaded.pop();
@@ -1100,8 +1100,8 @@ function addObjectToCanvas(o, selected) {
                 image: o.image,
                 name_val: o.name,
                 name: name,
-                originX: 'center',
-                originY: 'center',
+                originX: 'left',
+                originY: 'top',
                 left: o.x,
                 top: o.y,
                 lockMovementX: !diagram_rw,
@@ -1123,8 +1123,8 @@ function addObjectToCanvas(o, selected) {
                 image: o.image,
                 name_val: o.name,
                 name: name,
-                originX: 'center',
-                originY: 'center',
+                originX: 'left',
+                originY: 'top',
                 left: o.x,
                 top: o.y,
                 lockMovementX: !diagram_rw,
@@ -1146,8 +1146,8 @@ function addObjectToCanvas(o, selected) {
             fill: '#000000',
             fontSize: 12,
             fontFamily: 'verdana',
-            left: o.x,
-            top: o.y + (shape.getHeight()/2)
+            left: o.x + shape.getWidth()/2,
+            top: o.y + shape.getHeight()
         });
         shape.children = [name];
         canvas.add(shape);
@@ -1880,8 +1880,8 @@ $(document).ready(function() {
                                     dirty = true;
                                     obj.dirty = true;
                                     for (var j = 0; j < obj.children.length; j++) {
-                                        obj.children[j].setTop(tmod + obj.getTop() + (obj.getHeight()/2));
-                                        obj.children[j].setLeft(lmod + obj.getLeft());
+                                        obj.children[j].setTop(tmod + obj.getTop() + obj.getHeight());
+                                        obj.children[j].setLeft(lmod + obj.getLeft() + obj.getWidth()/2);
                                     }
                                     obj.setCoords();
                                     canvas.renderAll();
@@ -2092,10 +2092,10 @@ $(document).ready(function() {
                                         stroke: 'red',
                                         fill: 'rgba(0,0,0,0)',
                                         strokeWidth: 5,
-                                        originX: 'center',
-                                        originY: 'center',
-                                        left: from.left,
-                                        top: from.top,
+                                        originX: 'left',
+                                        originY: 'top',
+                                        left: from.left - 7.5,
+                                        top: from.top - 7.5,
                                         selectable: false,
                                         evented: false
                                     });
@@ -2112,10 +2112,10 @@ $(document).ready(function() {
                                         stroke: 'red',
                                         fill: 'rgba(0,0,0,0)',
                                         strokeWidth: 5,
-                                        originX: 'center',
-                                        originY: 'center',
-                                        left: to.left,
-                                        top: to.top,
+                                        originX: 'left',
+                                        originY: 'top',
+                                        left: to.left - 7.5,
+                                        top: to.top - 7.5,
                                         selectable: false,
                                         evented: false
                                     });
