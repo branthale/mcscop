@@ -87,7 +87,8 @@ var f = function(e)
                         contentType: false,
                         processData: false,
                         success: function() {
-                            $("#users").trigger("reloadGrid");
+                            e.target.src = 'images/avatars/' + e.target.id.split('_')[1] + '.png?' + new Date().getTime();
+//                            $("#users").trigger("reloadGrid");
                         },
                         error: function() {
                             console.log('upload error');
@@ -265,7 +266,7 @@ $(document).ready(function() {
                     }
                 },
                 { label: 'id', name: 'id', key: true, editable: false, hidden: true },
-                { label: 'Avatar', name: 'avatar', width: 25, editable: false, formatter: function (c, o, r) {
+                { label: 'Avatar', name: 'avatar', width: 53, fixed: true, editable: false, formatter: function (c, o, r) {
                         if (r.avatar !== null)
                             return '<img class="droppable avatar" id="avatar_' + r.id + '" src="images/avatars/' + r.id + '.png"/>';
                         else
@@ -276,7 +277,7 @@ $(document).ready(function() {
                 { label: 'Name', name: 'name', width: 50, editable: users_rw, edittype: 'text' },
                 { label: 'Set Password', name: 'password', width: 50, editable: users_rw, edittype: 'password' },
                 { label: 'System Permissions', name: 'permissions', width: 200, editable: users_rw, edittype: 'select', formatter: 'select', editoptions: {
-                        value: {none: 'None', all:'All', manage_missions:'Manage Missions', manage_users:'Manage Users', manage_roles:'Manage Roles'},
+                        value: {none: 'None', all:'All', manage_missions:'Manage Missions', delete_missions: 'Delete Missions', manage_users:'Manage Users', manage_roles:'Manage Roles'},
                         multiple: true,
                         size: 10
                     }

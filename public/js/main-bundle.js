@@ -14203,8 +14203,11 @@ function addZero(i) {
 
 $(document).ready(function() {
     var missions_rw = false;
+    var delete_missions = false;
     if (permissions.indexOf('all') !== -1 || permissions.indexOf('manage_missions') !== -1)
         missions_rw = true;
+    if (permissions.indexOf('all') !== -1 || permissions.indexOf('delete_missions') !== -1)
+        delete_missions = true;
 
     $("#missions").jqGrid({
         datatype: 'json',
@@ -14227,7 +14230,7 @@ $(document).ready(function() {
                     delbutton: false,
                 }, formatter: function(cell, options, row) {
                     var buttons = '<div title="Delete row" style="float: left;';
-                    if (!missions_rw)
+                    if (!delete_missions)
                         buttons += ' display: none;';
                     buttons += '" class="ui-pg-div ui-inline-del" id="jDelButton_' + options.rowId + '" onclick="main.deleteRowConfirm(\'#missions\', \'' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-trash"></span></div> ';
                     buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-row ui-inline-save-row" id="jSaveButton_' + options.rowId + '" onclick="main.saveRow(\'opnote\', \'#opnotes2\', \'' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';

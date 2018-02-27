@@ -53,7 +53,7 @@ Array.prototype.move = function (old_index, new_index) {
     return this;
 };
 
-var cop_permissions = ['all', 'manage_missions', 'manage_users', 'manage_roles'];
+var cop_permissions = ['all', 'manage_missions', 'delete_missions', 'manage_users', 'manage_roles'];
 var mission_permissions = ['all', 'manage_users', 'modify_diagram', 'create_events', 'delete_events', 'modify_notes', 'create_opnotes', 'delete_opnotes', 'modify_files'];
 
 app.set('view engine', 'pug');
@@ -63,7 +63,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 if (cspEnabled) {
     app.use(function(req, res, next) {
-        res.setHeader("Content-Security-Policy", "connect-src 'self' wss://" + url + "; connect-src 'self' ws://" + url + "; worker-src 'self' https://" + url + " blob:; default-src 'unsafe-inline' 'unsafe-eval' 'self'; img-src 'self' data:;");
+        res.setHeader("Content-Security-Policy", "connect-src 'self' wss://" + url + " ws://" + url + "; worker-src 'self' https://" + url + " blob:; default-src 'unsafe-inline' 'unsafe-eval' 'self'; img-src 'self' data: blob:;");
         return next();
     });
 }
@@ -827,7 +827,7 @@ app.post('/api/:table', function (req, res) {
 // MISSIONS
     if (req.params.table !== undefined && req.params.table === 'missions') {
         if (req.body.oper === undefined) {
-            connection.query("SELECT id, name, start_date, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) as analyst, (SELECT permissions FROM mission_users_rel WHERE user_id = ? AND mission = missions.id) as permissions FROM missions WHERE deleted = 0 HAVING permissions IS NOT NULL OR 1 = ?", [req.session.user_id, req.session.user_id], function(err, rows, fields) {
+            connection.query("SELECT id, name, start_date, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) as analyst, (SELECT permissions FROM mission_users_rel WHERE user_id = ? AND mission = missions.id LIMIT 1) as permissions FROM missions WHERE deleted = 0 HAVING permissions IS NOT NULL OR 1 = ?", [req.session.user_id, req.session.user_id], function(err, rows, fields) {
                 if (!err) {
                     res.end(JSON.stringify(rows));
                 } else {
@@ -851,9 +851,10 @@ app.post('/api/:table', function (req, res) {
                 req.body.analyst = req.session.user_id;
             connection.query('INSERT INTO missions (name, start_date, analyst) values (?, ?, ?)', [req.body.name, req.body.start_date, req.body.analyst], function (err, results) {
                 if (!err) {
-                    connection.query('INSERT INTO mission_users_rel (user_id, mission, permissions) values (?, ?, ?)', [req.session.user_id, results.insertId, 'all'], function (err, results) {
+                    var i =  results.insertId;
+                    connection.query('INSERT INTO mission_users_rel (user_id, mission, permissions) values (?, ?, ?)', [req.session.user_id, i, 'all'], function (err, results) {
                         if (req.session.user_id !== 1)
-                            connection.query('INSERT INTO mission_users_rel (user_id, mission, permissions) values (?, ?, ?)', [1, results.insertId, 'all']); // make sure admin gets all perms
+                            connection.query('INSERT INTO mission_users_rel (user_id, mission, permissions) values (?, ?, ?)', [1, i, 'all']); // make sure admin gets all perms
                         res.end(JSON.stringify('OK'));
                     });
                 } else {
@@ -861,7 +862,7 @@ app.post('/api/:table', function (req, res) {
                     res.end(JSON.stringify('ERR'));
                 }
             });
-        } else if (req.body.oper === 'del' && hasPermission(req.session.cop_permissions, 'manage_missions') && req.body.id !== undefined) {
+        } else if (req.body.oper === 'del' && hasPermission(req.session.cop_permissions, 'delete_missions') && req.body.id !== undefined) {
             var id = JSON.parse(req.body.id);
             connection.query('UPDATE missions SET deleted = 1 WHERE id = ?', [id], function (err, results) {
                 if (!err) {
@@ -1197,7 +1198,7 @@ app.use('/download', express.static(path.join(__dirname, 'mission-files'), {
 }))
 
 app.post('/mkdir', function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions, 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
         res.end('ERR');
         return;
     }
@@ -1229,7 +1230,7 @@ app.post('/mkdir', function (req, res) {
 });
 
 app.post('/mv', function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions, 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
         res.end('ERR');
         return;
     }
@@ -1264,7 +1265,7 @@ app.post('/mv', function (req, res) {
 });
 
 app.post('/delete', function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions, 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
         res.end('ERR');
         return;
     }
@@ -1301,7 +1302,7 @@ app.post('/delete', function (req, res) {
 });
 
 app.post('/upload', upload.any(), function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions, 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
         res.end('ERR');
         return;
     }
@@ -1325,7 +1326,7 @@ app.post('/upload', upload.any(), function (req, res) {
 });
 
 app.post('/avatar', upload.any(), function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.cop_permissions, 'modify_users')) {
+    if (!req.session.loggedin || (!hasPermission(req.session.cop_permissions, 'modify_users') && req.session.user_id !== parseInt(req.body.id))) {
         res.end('ERR');
         return;
     }

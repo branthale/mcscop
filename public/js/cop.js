@@ -18,12 +18,12 @@ var bootbox = require('./bootbox.min');
 require('./jquery.jqGrid.min');
 require('./grid.locale-en');
 require('./fabric.min');
-require('jquery-simplecolorpicker')
 require('image-picker');
 var jqGrid = require('./jquery.jqGrid.min');
 var noUiSlider = require('nouislider');
 var jstree = require('jstree');
 require('./files');
+require('./palette-color-picker.min');
 var sharedb = require('sharedb/lib/client');
 var richText = require('rich-text');
 var StringBinding = require('sharedb-string-binding');
@@ -52,6 +52,7 @@ if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_diagram') !
     $("#insertObjectButton").prop('disabled', false).click(insertObject);
     $("#deleteObjectButton").prop('disabled', false).click(deleteObjectConfirm);;
 }
+$("#play").click(function() { toggleAnimateSlider(); });
 $("#toolsTab").click(function() { toggleToolbar('tools'); });
 $("#tasksTab").click(function() { toggleToolbar('tasks'); });
 $("#notesTab").click(function() { toggleToolbar('notes'); });
@@ -60,8 +61,6 @@ $("#eventsTab").click(function() { toggleTable('events'); });
 $("#opnotesTab").click(function() { toggleTable('opnotes'); });
 $("#chatTab").click(function() { toggleTable('chat'); });
 $("#settingsTab").click(function() { toggleTable('settings'); });
-$("#propFillColor").change(function() { updatePropFillColor(this.value); });
-$("#propStrokeColor").change(function() { updatePropStrokeColor(this.value) });
 $("#propName").change(function() { updatePropName(this.value) });
 $("#zoomInButton").click(function() { zoomIn(); });
 $("#zoomOutButton").click(function() { zoomOut(); });
@@ -346,8 +345,10 @@ fabric.util.addListener(canvas.upperCanvasEl, 'dblclick', function (e) {
     if (canvas.getActiveObject() !== null && canvas.getActiveGroup() === null && !creatingLink) {
         if (o.objType !== undefined) {
             $('#propID').val(o.id);
-            $('#propFillColor').simplecolorpicker('selectColor', o.fill);
-            $('#propStrokeColor').simplecolorpicker('selectColor', o.stroke);
+            $('#propFillColor').val(o.fill);
+            $('#propFillColor').data('paletteColorPickerPlugin').reload();
+            $('#propStrokeColor').val(o.stroke);
+            $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
             $('#propName').val('');
             if (o.children !== undefined) {
                 for (var i = 0; i < o.children.length; i++) {
@@ -398,8 +399,10 @@ canvas.on('object:selected', function(options) {
                 }
             } else {
                 $('#propID').val(o.id);
-                $('#propFillColor').simplecolorpicker('selectColor', o.fill);
-                $('#propStrokeColor').simplecolorpicker('selectColor', o.stroke);
+                $('#propFillColor').val(o.fill);
+                $('#propFillColor').data('paletteColorPickerPlugin').reload();
+                $('#propStrokeColor').val(o.stroke);
+                $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
                 $('#propName').val('');
                 if (o.children !== undefined) {
                     for (var i = 0; i < o.children.length; i++) {
@@ -653,7 +656,6 @@ function editDetails(id, name) {
         if (canvas.getActiveObject().name_val)
             name = '- ' + canvas.getActiveObject().name_val.split('\n')[0];
     } else {
-        console.log(notes_rw);
         if (notes_rw)
             rw = true;
     }
@@ -754,7 +756,6 @@ function updateMinimapBg() {
 function zoomIn() {
     if (canvas.getZoom() > 2.0)
         return;
-    console.log(canvas.getZoom());
     canvas.zoomToPoint(new fabric.Point(canvas.width / 2, canvas.height / 2), (canvas.getZoom() * 1.1).round(2));
     settings.x = Math.round(canvas.viewportTransform[4]);
     settings.y = Math.round(canvas.viewportTransform[5]);
@@ -929,6 +930,22 @@ function cancelMenu() {
     return false;
 }
 
+function rgba2rgb(hex, a)
+{
+    hex = hex.replace('#','');
+    var bigint = parseInt(hex, 16);
+    var r = (bigint >> 16) & 255;
+    var g = (bigint >> 8) & 255;
+    var b = bigint & 255;
+    r1 = (1 - a) * 255 + a * r;
+    g1 = (1 - a) * 255 + a * g;
+    b1 = (1 - a) * 255 + a * b;
+    var bin = r1 << 16 | g1 << 8 | b1;
+    return (function(h){
+        return new Array(7-h.length).join("0")+h
+    })(bin.toString(16).toUpperCase())
+}
+
 function addZero(i) {
     if (i < 10) {
         i = "0" + i;
@@ -956,6 +973,8 @@ function addObjectToCanvas(o, selected) {
             var to = toObject.getCenterPoint();
             pending = false;
         }
+        if (o.stroke_color === '') // don't allow links to disappear
+            o.stroke_color = '#000000';
         var line = new fabric.Line([from.x, from.y, to.x, to.y], {
             pending: pending,
             id: o.id,
@@ -1025,10 +1044,17 @@ function addObjectToCanvas(o, selected) {
                 });
                 if (shape.paths && !shape.image.includes('static')) {
                     for (var i = 0; i < shape.paths.length; i++) {
-                        if (shape.paths[i].fill !== 'rgba(254,254,254,1)' && shape.paths[i].fill !== '') {
-                            shape.paths[i].setFill(o.fill_color);
+                        var fill = shape.paths[i].getFill();
+                        var fillAlpha = 1.0;
+                        try {
+                            if (fill.split("(")[1].split(")")[0].split(",")[3] < 1)
+                                fillAlpha = 1 - fill.split("(")[1].split(")")[0].split(",")[3];
+                        } catch (e) {}
+                        if (shape.paths[i].fill != '#FFFFFF' && shape.paths[i].fill !== 'rgba(255,255,255,1)' && shape.paths[i].fill !== 'rgba(254,254,254,1)' && shape.paths[i].fill !== '') {
+                            var color = '#' + rgba2rgb(o.fill_color, fillAlpha);
+                            shape.paths[i].setFill(color);
                         }
-                        if (shape.paths[i].stroke !== 'rgba(254,254,254,1)') {
+                        if (o.stroke_color !== '' && shape.paths[i].stroke !== 'rgba(254,254,254,1)') {
                             shape.paths[i].setStroke(o.stroke_color);
                         }
                     }
@@ -1339,7 +1365,7 @@ function openToolbar(mode) {
             $('#tasksForm').hide();
             $('#notesForm').hide();
             $('#filesForm').hide();
-            $('#propFillColorDiv').show();
+            $('#propFillColorSpan').show();
             if (canvas.getActiveObject()) {
                 if (diagram_rw)
                     $('#toolbarTitle').html('Edit Object');
@@ -1354,7 +1380,7 @@ function openToolbar(mode) {
                 $('#propObjectGroup').tabs('disable');
                 var objType = $('#propType').val();
                 if (objType === 'link')
-                    $('#propFillColorDiv').hide();
+                    $('#propFillColorSpan').hide();
                 var index = $('#propObjectGroup a[href="#tabs-' + objType + '"]').parent().index();
                 $('#propObjectGroup').tabs('enable', index);
                 $('#propObjectGroup').tabs('option', 'active', index);
@@ -1363,8 +1389,10 @@ function openToolbar(mode) {
                 $('#propID').val('');
                 $('#propNameGroup').show();
                 $('#propName').val('');
-                $('#propFillColor').simplecolorpicker('selectColor', lastFillColor);
-                $('#propStrokeColor').simplecolorpicker('selectColor', lastStrokeColor);
+                $('#propFillColor').val(lastFillColor);
+                $('#propFillColor').data('paletteColorPickerPlugin').reload();
+                $('#propStrokeColor').val(lastStrokeColor);
+                $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
                 $('#propType').val('icon');
                 $('#prop-icon').val('00-000-icon-hub.png');
                 $('#prop-icon').data('picker').sync_picker_with_select();
@@ -1812,6 +1840,8 @@ $(document).ready(function() {
                             addObjectToCanvas(o, selected);
                             canvas.renderAll();
                         } else if (o.type === 'shape' || o.type === 'link') {
+                            if (o.type === 'link' && o.stroke_color === '') // don't let links disappear
+                                o.stroke_color = '#000000';
                             canvas.item(i).setStroke(o.stroke_color);
                             canvas.item(i).setFill(o.fill_color);
                             canvas.item(i).set('dirty', true);
@@ -1971,9 +2001,9 @@ $(document).ready(function() {
         beforeActivate: function(e, u) {
             $('#propType').val(u.newPanel.attr('id').split('-')[1]);
             if ($('#propType').val() === 'link')
-                $('#propFillColorDiv').hide();
+                $('#propFillColorSpan').hide();
             else
-                $('#propFillColorDiv').show();
+                $('#propFillColorSpan').show();
         }
     });
     $.each(['icon','shape','link'], function(i, v) {
@@ -2133,6 +2163,7 @@ $(document).ready(function() {
     });
     // ---------------------------- OPNOTES TABLE ----------------------------------
     $("#opnotes2").jqGrid({
+        idPrefix: 'opnotes_',
         datatype: 'local',
         cellsubmit: 'clientArray',
         editurl: 'clientArray',
@@ -2261,6 +2292,8 @@ $(document).ready(function() {
             caption:"",
             buttonicon:"ui-icon-plus",
             onClickButton: function() {
+                if (celledit)
+                    celledit();
                 if (!addingRow) {
                     addingRow = true;
                     $('#opnotes2').jqGrid('addRow', {position: 'last', initdata: {event_time: getDate()}, addRowParams: {
@@ -2331,6 +2364,7 @@ $(document).ready(function() {
     });
     // ---------------------------- EVENTS TABLE ----------------------------------
     $("#events2").jqGrid({
+        idPrefix: 'events_',
         datatype: 'local',
         cellsubmit: 'clientArray',
         editurl: 'clientArray',
@@ -2511,6 +2545,8 @@ $(document).ready(function() {
             caption:"", 
             buttonicon:"ui-icon-plus", 
             onClickButton: function(){
+                if (cellEdit)
+                    cellEdit();
                 if (!addingRow) {
                     addingRow = true;
                     $('#events2').jqGrid('addRow', {position: 'last', initdata: {event_time: getDate(), discovery_time: getDate()}, addRowParams: {
@@ -2583,6 +2619,7 @@ $(document).ready(function() {
     });
     // ---------------------------- USERS TABLE ----------------------------------
     $("#users").jqGrid({
+        idPrefix: 'users_',
         datatype: 'local',
         cellsubmit: 'clientArray',
         editurl: 'clientArray',
@@ -2670,8 +2707,60 @@ $(document).ready(function() {
         windowTemplate: $('#details_template').html()
     });
     // ---------------------------- MISC ----------------------------------
-    $('#propFillColor').simplecolorpicker({picker: true});
-    $('#propStrokeColor').simplecolorpicker({picker: true});
+    $('[name="propFillColor"]').paletteColorPicker({
+        colors: [
+            {'#000000': '#000000'},
+            {'#808080': '#808080'},
+            {'#c0c0c0': '#c0c0c0'},
+            {'#ffffff': '#ffffff'},
+            {'#800000': '#800000'},
+            {'#ff0000': '#ff0000'},
+            {'#808000': '#808000'},
+            {'#ffff00': '#ffff00'},
+            {'#008000': '#008000'},
+            {'#00ff00': '#00ff00'},
+            {'#008080': '#008080'},
+            {'#00ffff': '#00ffff'},
+            {'#000080': '#000080'},
+            {'#0000ff': '#0000ff'},
+            {'#800080': '#800080'},
+            {'#ff00ff': '#ff00ff'}  
+        ],
+        position: 'upside',
+        timeout: 2000,
+        close_all_but_this: true,
+        onchange_callback: function (color) {
+            if (color !== $('#propFillColor').val())
+                updatePropFillColor(color);
+        }
+    });
+    $('[name="propStrokeColor"]').paletteColorPicker({
+        colors: [
+            {'#000000': '#000000'},
+            {'#808080': '#808080'},
+            {'#c0c0c0': '#c0c0c0'},
+            {'#ffffff': '#ffffff'},
+            {'#800000': '#800000'},
+            {'#ff0000': '#ff0000'},
+            {'#808000': '#808000'},
+            {'#ffff00': '#ffff00'},
+            {'#008000': '#008000'},
+            {'#00ff00': '#00ff00'},
+            {'#008080': '#008080'},
+            {'#00ffff': '#00ffff'},
+            {'#000080': '#000080'},
+            {'#0000ff': '#0000ff'},
+            {'#800080': '#800080'},
+            {'#ff00ff': '#ff00ff'}  
+        ],
+        position: 'upside',
+        timeout: 2000, // default -> 2000
+        close_all_but_this: true,
+        onchange_callback: function (color) {
+            if (color !== $('#propStrokeColor').val())
+                updatePropStrokeColor(color);
+        }
+    });
     $("#diagram_jumbotron").resizable({ handles: 's', minHeight: 100 });
     $("#toolbar-body").resizable({ handles: 'w', maxWidth: $('#diagram_jumbotron').width()-60 });
     $("#toolbar-body").on('resize', function(event, ui) {

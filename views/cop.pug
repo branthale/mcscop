@@ -13,7 +13,7 @@ html
     link(rel='stylesheet', href='css/quill.snow.css')
     link(rel='stylesheet', href='css/nouislider.min.css')
     link(rel='stylesheet', href='css/jstree.min.css')
-    link(rel='stylesheet', href='css/colorpicker.css')
+    link(rel='stylesheet', href='css/palette-color-picker.css')
     link(rel='stylesheet', href='css/files.css')
     link(rel='stylesheet', href='css/style.css')
     link(rel='https://fonts.googleapis.com/css?family=Roboto:400,500|Inconsolata:400,700')
@@ -71,41 +71,10 @@ html
               div.form-group#propColorGroup
                 label Color
                 div.colors
-                  div#propFillColorDiv
-                    select#propFillColor(name="propFillColor")
-                      option(value="#000000") selected) Black
-                      option(value="#808080") Gray
-                      option(value="#c0c0c0") Silver
-                      option(value="#ffffff") White
-                      option(value="#800000") Maroon
-                      option(value="#ff0000") Red
-                      option(value="#808000") Olive
-                      option(value="#ffff00") Yellow
-                      option(value="#008000") Green
-                      option(value="#00ff00") Lime
-                      option(value="#008080") Teal
-                      option(value="#00ffff") Aqua
-                      option(value="#000080") Navy
-                      option(value="#0000ff") Blue
-                      option(value="#800080") Purple
-                      option(value="#ff00ff") Fuschia
-                  select#propStrokeColor(name="propStrokeColor")
-                    option(value="#000000") selected) Black
-                    option(value="#808080") Gray
-                    option(value="#c0c0c0") Silver
-                    option(value="#ffffff") White
-                    option(value="#800000") Maroon
-                    option(value="#ff0000") Red
-                    option(value="#808000") Olive
-                    option(value="#ffff00") Yellow
-                    option(value="#008000") Green
-                    option(value="#00ff00") Lime
-                    option(value="#008080") Teal
-                    option(value="#00ffff") Aqua
-                    option(value="#000080") Navy
-                    option(value="#0000ff") Blue
-                    option(value="#800080") Purple
-                    option(value="#ff00ff") Fuschia
+                  span#propFillColorSpan
+                    input#propFillColor(name="propFillColor" type="text" style="width: 0px; border: 0px")
+                  span#propStrokeColorSpan
+                    input#propStrokeColor(name="propStrokeColor" type="text" style="width: 0px; border: 0px")
               div.form-group#propObjectGroup
                 ul
                   li
@@ -150,7 +119,7 @@ html
           div.tab-text.tab-float.settings-tab SETTINGS
         div#events
           div#sliderContainer
-            button#play.ui-icon.ui-icon-play(onclick='toggleAnimateSlider()')
+            button#play.ui-icon.ui-icon-play
             div#slider
           table#events2
           div#eventsPager

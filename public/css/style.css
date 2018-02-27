@@ -398,11 +398,11 @@ button.pane-close {
 #play {
     float: left;
     display: flex;
-    width: 21px;
-    height: 21px;
+    width: 22px;
+    height: 22px;
     margin-right: 20px;
     position: relative;
-    bottom: -2px;
+    bottom: 2px;
 }
 
 #slider {
@@ -607,10 +607,6 @@ input[type="text"] {
 #propObjectGroup {
     height: 300px;
     overflow-x: hidden;
-}
-
-#propFillColorDiv {
-    float: left;
 }
 
 .cancelLink {
