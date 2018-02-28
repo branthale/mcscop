@@ -1638,26 +1638,26 @@ function deleteObject() {
     }
 }
 
-function deleteRowConfirm(type, table, id) {
+function deleteRowConfirm(type, table, id, prefix) {
     $('#modal-title').text('Are you sure?');
     $('#modal-body').html('<p>Are you sure you want to delete this row?</p>');
-    $('#modal-footer').html('<button type="button btn-primary" class="button btn btn-danger" data-dismiss="modal" onClick="cop.deleteRow(\'' + type + '\', \'' + table + '\', \'' + id + '\');">Yes</button> <button type="button btn-primary" class="button btn btn-default" data-dismiss="modal">No</button>');
+    $('#modal-footer').html('<button type="button btn-primary" class="button btn btn-danger" data-dismiss="modal" onClick="cop.deleteRow(\'' + type + '\', \'' + table + '\', \'' + id + '\', \'' + prefix + '\');">Yes</button> <button type="button btn-primary" class="button btn btn-default" data-dismiss="modal">No</button>');
     $('#modal-content').removeAttr('style');
     $('#modal-content').removeClass('modal-details');
     $('#modal').modal('show')
 }
 
-function deleteRow(type, table, id) {
+function deleteRow(type, table, id, prefix) {
     diagram.send(JSON.stringify({act: 'delete_' + type, arg: {id: id}, msgId: msgHandler()}));
-    $(table).jqGrid('delRowData', id);
+    $(table).jqGrid('delRowData', prefix + id);
 }
 
-function saveRow(type, table, id) {
+function saveRow(type, table, id, prefix) {
     addingRow = false;
     var data = {};
     var act = "update_" + type;
     if (id.indexOf('jqg') !== -1) {
-        $(table + ' #' + id).find('input, select, textarea').each(function () {
+        $(table + ' #' + prefix + id).find('input, select, textarea').each(function () {
             data[this.name] = $(this).val();
         });
         act = "insert_" + type;
@@ -1666,12 +1666,11 @@ function saveRow(type, table, id) {
         $(table).jqGrid('saveRow', id); 
         data = $(table).getRowData(id);
     }
-    $(table).jqGrid('restoreRow', id, function(){});
     if (data.event_time)
         data.event_time = dateStringToEpoch(data.event_time);
     if (data.discovery_time)
         data.discovery_time = dateStringToEpoch(data.discovery_time);
-    diagram.send(JSON.stringify({act: act, arg: data, msgId: msgHandler()}));
+    $(table).jqGrid('restoreRow', prefix + id, function(){ setTimeout(function() { diagram.send(JSON.stringify({act: act, arg: data, msgId: msgHandler()}));} ,10) });
 }
 
 $(document).ready(function() {
@@ -2187,8 +2186,8 @@ $(document).ready(function() {
                     var buttons = '<div title="Delete row" style="float: left;';
                     if (!opnotes_del)
                         buttons += ' display: none;';
-                    buttons += '" class="ui-pg-div ui-inline-del" id="jDelButton_' + options.rowId + '" onclick="cop.deleteRowConfirm(\'opnote\', \'#opnotes2\', \'' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-trash"></span></div> ';
-                    buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-row ui-inline-save-row" id="jSaveButton_' + options.rowId + '" onclick="cop.saveRow(\'opnote\', \'#opnotes2\', \'' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';
+                    buttons += '" class="ui-pg-div ui-inline-del" id="jDelButton_' + options.rowId + '" onclick="cop.deleteRowConfirm(\'opnote\', \'#opnotes2\', \'' + options.rowId + '\', \'opnotes_\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-trash"></span></div> ';
+                    buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-row ui-inline-save-row" id="jSaveButton_' + options.rowId + '" onclick="cop.saveRow(\'opnote\', \'#opnotes2\', \'' + options.rowId + '\', \'opnotes_\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';
                     buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-cell ui-inline-save-cell" id="jSaveButton_' + options.rowId + '" onclick="$(\'#opnotes2\').saveCell(lastselection.iRow, lastselection.iCol);" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';
                     buttons += '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel ui-inline-cancel-row" id="jCancelButton_' + options.rowId + '" onclick="jQuery.fn.fmatter.rowactions.call(this,\'cancel\'); addingRow = false;" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-cancel"></span></div>';
                     buttons +=  '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel ui-inline-cancel-cell" id="jCancelButton_' + options.rowId + '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel" id="btn_cancel_' + options.rowId + '" onclick="$(\'#opnotes2\').restoreCell(lastselection.iRow, lastselection.iCol);" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-cancel"></span></div>';
@@ -2292,8 +2291,8 @@ $(document).ready(function() {
             caption:"",
             buttonicon:"ui-icon-plus",
             onClickButton: function() {
-                if (celledit)
-                    celledit();
+                if (cellEdit)
+                    cellEdit();
                 if (!addingRow) {
                     addingRow = true;
                     $('#opnotes2').jqGrid('addRow', {position: 'last', initdata: {event_time: getDate()}, addRowParams: {
@@ -2406,8 +2405,8 @@ $(document).ready(function() {
                     var buttons = '<div title="Delete row" style="float: left;';
                     if (!events_del)
                         buttons += ' display: none;';
-                    buttons += '" class="ui-pg-div ui-inline-del" id="jDelButton_' + options.rowId + '" onclick="cop.deleteRowConfirm(\'event\', \'#events2\', \'' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-trash"></span></div> ';
-                    buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-save ui-inline-save-row" id="jSaveButton_' + options.rowId + '" onclick="cop.saveRow(\'event\', \'#events2\', \'' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';
+                    buttons += '" class="ui-pg-div ui-inline-del" id="jDelButton_' + options.rowId + '" onclick="cop.deleteRowConfirm(\'event\', \'#events2\', \'' + options.rowId + '\', \'events_\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-trash"></span></div> ';
+                    buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-save ui-inline-save-row" id="jSaveButton_' + options.rowId + '" onclick="cop.saveRow(\'event\', \'#events2\', \'' + options.rowId + '\', \'events_\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';
                     buttons += '<div title="Save row" style="float: left; display: none;" class="ui-pg-div ui-inline-save ui-inline-save-cell" id="jSaveButton_' + options.rowId + '" onclick="$(\'#events2\').saveCell(lastselection.iRow, lastselection.iCol);" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-disk"></span></div>';
                     buttons += '<div title="Cancel new row" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel ui-inline-cancel-row" id="jCancelButton_' + options.rowId + '" onclick="jQuery.fn.fmatter.rowactions.call(this,\'cancel\'); addingRow = false;" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-cancel"></span></div>';
                     buttons +=  '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel ui-inline-cancel-cell" id="jCancelButton_' + options.rowId + '<div title="Cancel row editing" style="float: left; display: none;" class="ui-pg-div ui-inline-cancel" id="btn_cancel_' + options.rowId + '" onclick="$(\'#events2\').restoreCell(lastselection.iRow, lastselection.iCol);" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-cancel"></span></div>';
@@ -2557,11 +2556,10 @@ $(document).ready(function() {
                                 $(this).find('input, select, textarea').each(function () {
                                     data[this.name] = $(this).val();
                                 });
-                                $('#events2').jqGrid('restoreRow', id, function(){});
                                 data.event_time = dateStringToEpoch(data.event_time);
                                 data.discovery_time = dateStringToEpoch(data.discovery_time);
                                 delete data.actions;
-                                diagram.send(JSON.stringify({act: 'insert_event', arg: data, msgId: msgHandler()}));
+                                $('#events2').jqGrid('restoreRow', id, function(){ setTimeout(function () { diagram.send(JSON.stringify({act: 'insert_event', arg: data, msgId: msgHandler()})); } , 10); });
                                 $('#events2').jqGrid('resetSelection');
                             },
                             oneditfunc: function(id) {
