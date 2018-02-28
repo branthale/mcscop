@@ -280,11 +280,61 @@ canvas.on('object:rotating', function(options) {
 });
 
 canvas.on('object:moving', function(options) {
-    var grid = 10;
+    var grid = 1;
     options.target.set({
         left: Math.round(options.target.left / grid) * grid,
         top: Math.round(options.target.top / grid) * grid
     });
+    var hAligned = false;
+    var vAligned = false;
+    for (var i = 0; i < canvas.getObjects().length; i++) {
+        if (canvas.item(i).objType && canvas.item(i).objType === 'icon' && canvas.item(i) !== options.target) {
+            if (Math.round(canvas.item(i).getCenterPoint().y) === Math.round(options.target.getCenterPoint().y)) {
+                hAligned = true;
+                if (!options.target.hGuide) {
+                    var line = new fabric.Line([options.target.getCenterPoint().x - 500, options.target.getCenterPoint().y, options.target.getCenterPoint().x + 500, options.target.getCenterPoint().y], {
+                        dad: options.target,
+                        objType: 'guide',
+                        stroke: '#66bfff',
+                        strokeColor: '#66bfff',
+                        strokeWidth: 1,
+                        selectable: false,
+                        evented: false
+                    });
+                    tempLink = line;
+                    canvas.add(line);
+                    tempLinks.push(tempLink);
+                    options.target.hGuide = line;
+                }
+            }
+            if (Math.round(canvas.item(i).getCenterPoint().x) === Math.round(options.target.getCenterPoint().x)) {
+                vAligned = true;
+                if (!options.target.vGuide) {
+                    var line = new fabric.Line([options.target.getCenterPoint().x, options.target.getCenterPoint().y - 500, options.target.getCenterPoint().x, options.target.getCenterPoint().y + 500], {
+                        dad: options.target,
+                        objType: 'guide',
+                        stroke: '#66bfff',
+                        strokeColor: '#66bfff',
+                        strokeWidth: 1,
+                        selectable: false,
+                        evented: false
+                    });
+                    tempLink = line;
+                    canvas.add(line);
+                    tempLinks.push(tempLink);
+                    options.target.vGuide = line;
+                }
+            }
+        }
+    }
+    if (!hAligned && options.target.hGuide) {
+        canvas.remove(options.target.hGuide);
+        delete options.target.hGuide;
+    }
+    if (!vAligned && options.target.vGuide) {
+        canvas.remove(options.target.vGuide);
+        delete options.target.vGuide;
+    }
     var tmod = 0;
     var lmod = 0;
     if (options.target._objects) {
@@ -328,6 +378,14 @@ canvas.on('object:modified', function(options) {
         lmod = options.target.getLeft();
     }
     var o = options.target._objects ? options.target._objects : [options.target];
+    if (options.target.hGuide) {
+        canvas.remove(options.target.hGuide);
+        delete options.target.hGuide;
+    }
+    if (options.target.vGuide) {
+        canvas.remove(options.target.vGuide);
+        delete options.target.vGuide;
+    }
     for (var i = 0; i < o.length; i++) {
         var z = canvas.getObjects().indexOf(o[i])/2;
         if (o[i].objType === 'link')
@@ -446,8 +504,7 @@ canvas.on('before:render', function(e) {
                 if (fromObj && toObj && (fromObj.dirty || toObj.dirty || canvas.item(i).pending)) {
                     var fromAbs = fromObj.calcTransformMatrix();
                     var toAbs = toObj.calcTransformMatrix();
-                    if (canvas.item(i).pending)
-                        canvas.item(i).pending = false;
+                    canvas.item(i).pending = false;
                     canvas.item(i).set({ 'x1': fromAbs[4], 'y1': fromAbs[5] });
                     canvas.item(i).set({ 'x2': toAbs[4], 'y2': toAbs[5] });
                     canvas.item(i).setCoords();
@@ -466,7 +523,7 @@ canvas.on('before:render', function(e) {
                 if (tempLinks[i].objType === 'link') {
                     tempLinks[i].set({ 'x1': tempLinks[i].from.getCenterPoint().x, 'y1': tempLinks[i].from.getCenterPoint().y });
                     tempLinks[i].set({ 'x2': tempLinks[i].to.getCenterPoint().x, 'y2': tempLinks[i].to.getCenterPoint().y });
-                } else {
+                } else if (tempLinks[i].objType === 'shape') {
                     tempLinks[i].set({top: tempLinks[i].dad.top - 7.5, left: tempLinks[i].dad.left - 7.5});
                 }
             }
@@ -1182,7 +1239,7 @@ function insertObject() {
         var center = new fabric.Point(canvas.width / 2, canvas.height / 2);
         lastFillColor = $('#propFillColor').val();
         lastStrokeColor = $('#propStrokeColor').val();
-        diagram.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom()) - settings.x, y: Math.round(center.y / canvas.getZoom() - settings.y), z: canvas.getObjects().length}, msgId: msgHandler()})); 
+        diagram.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom() - settings.x / canvas.getZoom()), y: Math.round(center.y / canvas.getZoom() - settings.y / canvas.getZoom()), z: canvas.getObjects().length}, msgId: msgHandler()})); 
     }
 }
 
