@@ -1,7 +1,7 @@
 // cop fqdn.  Don't include http, https, etc.
 var url = 'www.ironrain.org'
 // enable content security policy (this requires url to be set!)
-var cspEnabled = true;
+var cspEnabled = false;
 // mysql settings
 var mysqlOptions = {
     host : 'localhost',
