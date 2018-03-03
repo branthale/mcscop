@@ -57371,6 +57371,7 @@ fabric.Group.prototype.hasControls = false;
 fabric.Object.prototype.transparentCorners = false;
 fabric.Object.prototype.cornerSize = 7;
 fabric.Object.prototype.objectCaching = true;
+fabric.Object.NUM_FRACTION_DIGITS = 0;
 var canvas = new fabric.Canvas('canvas', {
     preserveObjectStacking: true,
     renderOnAddRemove: false,
@@ -57393,7 +57394,6 @@ var settings = {'zoom': 1.0, 'x': Math.round($('#diagram_jumbotron').width()/2),
 var earliest_messages = {}; //= 2147483647000;
 var creatingLink = false;
 var firstObject = null;
-var scale = 1;
 var objectSelect = [{id:0, name:'none/unknown'}];
 var userSelect = [{id:null, username:'none'}];
 var roleSelect = [{id:null, name:'none'}];
@@ -57403,7 +57403,8 @@ var updatingObject = false;
 var diagram;
 var toolbarState = false;
 var firstNode = null;
-var zoom = 1.0;
+var hSnap = false;
+var vSnap = false;
 var dirty = false;
 var SVGCache = {};
 var tempLinks = [];
@@ -57417,14 +57418,12 @@ var activeChannel = 'log';
 var chatPosition = {};
 var firstChat = true;
 var unreadMessages = {};
-var shouldBlur = false;
 var cellEdit = null;
 var cellEditRow = null;
 var clickComplete = false;
 var msgId = 0;
 var pendingMsg = [];
 global.lastselection = {id: null, iRow: null, iCol: null};
-var gridsize = 40;
 var lastFillColor = '#000000';
 var lastStrokeColor = '#ffffff';
 global.addingRow = false;
@@ -57542,18 +57541,23 @@ canvas.on('object:rotating', function(options) {
 
 canvas.on('object:moving', function(options) {
     var grid = 1;
+    var snap = 3;
     options.target.set({
         left: Math.round(options.target.left / grid) * grid,
         top: Math.round(options.target.top / grid) * grid
     });
+    var zoom = canvas.getZoom();
     var hAligned = false;
     var vAligned = false;
     for (var i = 0; i < canvas.getObjects().length; i++) {
         if (canvas.item(i).objType && canvas.item(i).objType === 'icon' && canvas.item(i) !== options.target) {
-            if (Math.round(canvas.item(i).getCenterPoint().y) === Math.round(options.target.getCenterPoint().y)) {
+            if (!hAligned && (Math.round(canvas.item(i).getCenterPoint().y) < Math.round(options.target.getCenterPoint().y) + snap && Math.round(canvas.item(i).getCenterPoint().y) > Math.round(options.target.getCenterPoint().y) - snap)) {
+                options.target.set({
+                    top: canvas.item(i).getCenterPoint().y - options.target.getHeight() / 2
+                });
                 hAligned = true;
                 if (!options.target.hGuide) {
-                    var line = new fabric.Line([options.target.getCenterPoint().x - 500, options.target.getCenterPoint().y, options.target.getCenterPoint().x + 500, options.target.getCenterPoint().y], {
+                    var line = new fabric.Line([-canvas.viewportTransform[4] / zoom, options.target.getCenterPoint().y, (-canvas.viewportTransform[4] + canvas.width) / zoom, options.target.getCenterPoint().y], {
                         dad: options.target,
                         objType: 'guide',
                         stroke: '#66bfff',
@@ -57568,10 +57572,14 @@ canvas.on('object:moving', function(options) {
                     options.target.hGuide = line;
                 }
             }
-            if (Math.round(canvas.item(i).getCenterPoint().x) === Math.round(options.target.getCenterPoint().x)) {
+            if (!vAligned && (Math.round(canvas.item(i).getCenterPoint().x) < Math.round(options.target.getCenterPoint().x) + snap && Math.round(canvas.item(i).getCenterPoint().x) > Math.round(options.target.getCenterPoint().x) - snap)) {
                 vAligned = true;
+                options.target.set({
+                    left: canvas.item(i).getCenterPoint().x - options.target.getWidth() / 2
+                });
+                
                 if (!options.target.vGuide) {
-                    var line = new fabric.Line([options.target.getCenterPoint().x, options.target.getCenterPoint().y - 500, options.target.getCenterPoint().x, options.target.getCenterPoint().y + 500], {
+                    var line = new fabric.Line([options.target.getCenterPoint().x, -canvas.viewportTransform[5] / zoom, options.target.getCenterPoint().x, (-canvas.viewportTransform[5] + canvas.height) / zoom], {
                         dad: options.target,
                         objType: 'guide',
                         stroke: '#66bfff',
@@ -58755,6 +58763,7 @@ function timestamp(str){
     var date = new Date(str);
     return (date.getFullYear() + '-' + addZero(date.getMonth()+1) + '-' + addZero(date.getDate()) + ' ' + addZero(date.getHours()) + ':' + addZero(date.getMinutes()) + ':' + addZero(date.getSeconds()) + '.' + date.getMilliseconds());
 }
+
 //start sharedb tasks
 function startTasks() {
     console.log('starting tasks');
@@ -58907,12 +58916,14 @@ function setSlider(i, value) {
     dateSlider.noUiSlider.set(r);
 }
 
+//resize jsGrids when window or canvas resizes
 function resizeTables() {
     $("#events2").setGridWidth(Math.round($('#tables').width()-5));
     $("#opnotes2").setGridWidth($('#tables').width()-5);
     $("#users").setGridWidth($('#tables').width()-5);
 }
 
+//resize fabricjs canvas when window is resized
 function resizeCanvas() {
     if (canvas.getHeight() != $('#diagram').height()) {
         canvas.setHeight($('#diagram').height());
