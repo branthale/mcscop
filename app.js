@@ -932,7 +932,7 @@ app.post('/api/:table', function (req, res) {
                     req.body.role = null;
                 if (req.body.permissions === undefined || req.body.permissions === '')
                     req.body.permissions = null;
-                connection.query('INSERT INTO users (username, name, password, permissions) values (?, ?, ?, ?, ?)', [req.body.username, req.body.name, hash, req.body.permissions], function (err, results) {
+                connection.query('INSERT INTO users (username, name, password, permissions) values (?, ?, ?, ?)', [req.body.username, req.body.name, hash, req.body.permissions], function (err, results) {
                     if (!err) {
                         res.end(JSON.stringify('OK'));
                     } else {
