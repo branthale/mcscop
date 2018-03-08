@@ -308,7 +308,7 @@ ws.on('connection', function(socket) {
                     break;
                 // ------------------------- USERS -------------------------
                 case 'get_users':
-                    connection.query('SELECT id, username, (SELECT role FROM mission_users_rel WHERE user_id = users.id AND mission = ?) AS role, (SELECT permissions FROM mission_users_rel WHERE user_id = users.id AND mission = ?) AS permissions FROM users WHERE deleted = 0', [socket.mission, socket.mission], function(err, rows, fields) {
+                    connection.query('SELECT id, username, (SELECT role FROM mission_users_rel WHERE user_id = users.id AND mission = ? LIMIT 1) AS role, (SELECT permissions FROM mission_users_rel WHERE user_id = users.id AND mission = ? LIMIT 1) AS permissions FROM users WHERE deleted = 0', [socket.mission, socket.mission], function(err, rows, fields) {
                         if (!err) {
                             socket.send(JSON.stringify({act:'all_users', arg:rows}));
                         } else
@@ -584,8 +584,8 @@ ws.on('connection', function(socket) {
                         if (o.type === 'icon' || o.type === 'shape') {
                             connection.query('SELECT count(*) AS z FROM objects WHERE deleted = 0 AND mission = ?', [socket.mission], function (err, results) {
                                 o.z = results[0].z;
-                                var x = 32;
-                                var y = 32;
+                                var x = 33;
+                                var y = 33;
                                 if (!isNaN(parseFloat(o.x)) && isFinite(o.x) && !isNaN(parseFloat(o.y)) && isFinite(o.y)) {
                                     x = o.x;
                                     y = o.y;
@@ -594,8 +594,8 @@ ws.on('connection', function(socket) {
                                 var scale_y = 1;
                                 var rot = 0;
                                 if (o.type === 'shape') {
-                                    scale_x = 64;
-                                    scale_y = 64;
+                                    scale_x = 65;
+                                    scale_y = 65;
                                 }
                                 o.type = xssFilters.inHTMLData(o.type);
                                 o.name = xssFilters.inHTMLData(o.name);
@@ -767,6 +767,8 @@ ws.on('connection', function(socket) {
                                 });
                             } else  {
                                 if (o.type !== undefined && (o.type === 'icon' || o.type === 'shape')) {
+                                    o.x = Math.round(o.x);
+                                    o.y = Math.round(o.y);
                                     connection.query('UPDATE objects SET x = ?, y = ?, scale_x = ?, scale_y = ?, rot = ? WHERE id = ?', [o.x, o.y, o.scale_x, o.scale_y, o.rot, o.id], function (err, results) {
                                         if (!err) {
                                             sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}), socket);
