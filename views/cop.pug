@@ -14,6 +14,7 @@ html
     link(rel='stylesheet', href='css/nouislider.min.css')
     link(rel='stylesheet', href='css/jstree.min.css')
     link(rel='stylesheet', href='css/palette-color-picker.css')
+    link(rel='stylesheet', href='css/toastr.min.css')
     link(rel='stylesheet', href='css/files.css')
     link(rel='stylesheet', href='css/style.css')
     link(rel='https://fonts.googleapis.com/css?family=Roboto:400,500|Inconsolata:400,700')
@@ -96,6 +97,10 @@ html
                     each link in links
                       option(data-img-src="images/links/" + link, data-img-class="first", value=link) link
               div.form-group#moveObject
+                  div.checkbox
+                    label
+                      input(type="checkbox", value="0" disabled)#lockObject
+                      | Locked?
                   button.propButton.btn.btn-default#moveUp(type='button' disabled) Up
                   button.propButton.btn.btn-default#moveDown(type='button' disabled) Down
                   button.propButton.btn.btn-default#moveToFront(type='button' disabled) Front
@@ -153,5 +158,5 @@ script(type="template/text", id="details_template")
         div.window-title.modal-title
       div.window-body.modal-body
       div.window-footer.modal-footer
-script var permissions = "#{permissions}".split(',');
+script var permissions = "#{permissions}".split(','); var user_id = "#{user_id}";
 script(src='js/cop-bundle.js')

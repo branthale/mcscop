@@ -602,7 +602,7 @@ ws.on('connection', function(socket) {
                                 o.fill_color = xssFilters.inHTMLData(o.fill_color);
                                 o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
                                 o.image = xssFilters.inHTMLData(o.image);
-                                connection.query('INSERT INTO objects (mission, type, name, fill_color, stroke_color, image, scale_x, scale_y, rot, x, y, z) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [socket.mission, o.type, o.name, o.fill_color, o.stroke_color, o.image, scale_x, scale_y, rot, x, y, o.z], function (err, results) {
+                                connection.query('INSERT INTO objects (mission, type, name, fill_color, stroke_color, image, scale_x, scale_y, rot, x, y, z, locked) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [socket.mission, o.type, o.name, o.fill_color, o.stroke_color, o.image, scale_x, scale_y, rot, x, y, o.z, o.locked], function (err, results) {
                                     if (!err) {
                                         o.id = results.insertId;
                                         connection.query('SELECT * FROM objects WHERE deleted = 0 AND id = ?', [o.id], function(err, rows, fields) {
@@ -623,7 +623,7 @@ ws.on('connection', function(socket) {
                             o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
                             o.image = xssFilters.inHTMLData(o.image);
                             o.z = 0;
-                            connection.query('INSERT INTO objects ( mission, type, name, stroke_color, image, obj_a, obj_b, z) values (?, ?, ?, ?, ?, ?, ?, ?)', [socket.mission, o.type, o.name, o.stroke_color, o.image, o.obj_a, o.obj_b, 99], function (err, results) {
+                            connection.query('INSERT INTO objects ( mission, type, name, stroke_color, image, obj_a, obj_b, z, locked) values (?, ?, ?, ?, ?, ?, ?, ?, 1)', [socket.mission, o.type, o.name, o.stroke_color, o.image, o.obj_a, o.obj_b, 99], function (err, results) {
                                 if (!err) {
                                     o.id = results.insertId;
                                         // move new links to back
@@ -728,7 +728,7 @@ ws.on('connection', function(socket) {
                     o.image = xssFilters.inHTMLData(o.image);
                     if (o.type !== undefined && hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
                         if (o.type === 'icon' || o.type === 'shape') {
-                            connection.query('UPDATE objects SET name = ?, fill_color = ?, stroke_color = ?, image = ? WHERE id = ?', [o.name, o.fill_color, o.stroke_color, o.image, o.id], function (err, results) {
+                            connection.query('UPDATE objects SET name = ?, fill_color = ?, stroke_color = ?, image = ?, locked = ? WHERE id = ?', [o.name, o.fill_color, o.stroke_color, o.image, o.locked, o.id], function (err, results) {
                                 if (!err) {
                                     insertLogEvent(socket, 'Modified object: ' + o.name + ' ID: ' + o.id + '.');
                                     sendToRoom(socket.room, JSON.stringify({act: 'change_object', arg: msg.arg}));
@@ -1101,7 +1101,7 @@ app.get('/cop', function (req, res) {
                             req.session.mission_role[req.query.mission] = mission_role;
                             req.session.mission_permissions[req.query.mission] = mission_permissions;
                             if (req.session.user_id === 1 || (mission_permissions && mission_permissions !== '')) // always let admin in
-                                res.render('cop', { title: 'MCSCOP', role: mission_role, permissions: mission_permissions, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
+                                res.render('cop', { title: 'MCSCOP', role: mission_role, permissions: mission_permissions, user_id: req.session.user_id, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
                             else
                                 res.redirect('login')
                         });

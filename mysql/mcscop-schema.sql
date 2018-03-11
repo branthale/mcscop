@@ -133,11 +133,12 @@ CREATE TABLE `objects` (
   `x` int(11) DEFAULT '0',
   `y` int(11) DEFAULT '0',
   `z` int(11) DEFAULT '0',
-  `obj_a` varchar(36) DEFAULT '1',
-  `obj_b` varchar(36) DEFAULT '1',
+  `obj_a` int(11) DEFAULT NULL,
+  `obj_b` int(11) DEFAULT NULL,
   `scale_x` double DEFAULT '1',
   `scale_y` double DEFAULT '1',
   `rot` double DEFAULT '0',
+  `locked` tinyint(1) NOT NULL DEFAULT '0',
   `deleted` tinyint(1) NOT NULL DEFAULT '0',
   `last_update` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
@@ -244,4 +245,4 @@ CREATE TABLE `users` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2018-02-25 15:00:04
+-- Dump completed on 2018-03-11 13:26:16

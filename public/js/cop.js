@@ -30,6 +30,7 @@ var StringBinding = require('sharedb-string-binding');
 global.hljs = require('highlight.js');
 var Quill = require('quill');
 var bsw = require('./bootstrap-window');
+var toastr = require('toastr');
 global.mission = getParameterByName('mission');
 
 // ---------------------------- PERMISSIONS & BUTTONS ----------------------------------
@@ -41,41 +42,43 @@ var details_rw = false;
 // bind buttons
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_diagram') !== -1) {
     diagram_rw = true;
-    $("#propName").prop('disabled', false);
-    $("#newObjectButton").prop('disabled', false).click(newObject);
-    $("#propFillColor").prop('disabled', false);
-    $("#propStrokeColor").prop('disabled', false);
-    $("#moveUp").prop('disabled', false).click(moveUp);
-    $("#moveDown").prop('disabled', false).click(moveDown);
-    $("#moveToFront").prop('disabled', false).click(moveToFront);
-    $("#moveToBack").prop('disabled', false).click(moveToBack);
-    $("#insertObjectButton").prop('disabled', false).click(insertObject);
-    $("#deleteObjectButton").prop('disabled', false).click(deleteObjectConfirm);;
+    $('#propName').prop('disabled', false);
+    $('#newObjectButton').prop('disabled', false).click(newObject);
+    $('#propFillColor').prop('disabled', false);
+    $('#propStrokeColor').prop('disabled', false);
+    $('#lockObject').prop('disabled', false);
+    $('#moveUp').prop('disabled', false).click(moveUp);
+    $('#moveDown').prop('disabled', false).click(moveDown);
+    $('#moveToFront').prop('disabled', false).click(moveToFront);
+    $('#moveToBack').prop('disabled', false).click(moveToBack);
+    $('#insertObjectButton').prop('disabled', false).click(insertObject);
+    $('#deleteObjectButton').prop('disabled', false).click(deleteObjectConfirm);;
 }
-$("#play").click(function() { toggleAnimateSlider(); });
-$("#toolsTab").click(function() { toggleToolbar('tools'); });
-$("#tasksTab").click(function() { toggleToolbar('tasks'); });
-$("#notesTab").click(function() { toggleToolbar('notes'); });
-$("#filesTab").click(function() { toggleToolbar('files'); });
-$("#eventsTab").click(function() { toggleTable('events'); });
-$("#opnotesTab").click(function() { toggleTable('opnotes'); });
-$("#chatTab").click(function() { toggleTable('chat'); });
-$("#settingsTab").click(function() { toggleTable('settings'); });
-$("#propName").change(function() { updatePropName(this.value) });
-$("#zoomInButton").click(function() { zoomIn(); });
-$("#zoomOutButton").click(function() { zoomOut(); });
-$("#closeToolbarButton").click(closeToolbar);
-$("#cancelLinkButton").click(cancelLink);
-$("#editDetailsButton").click(function() { editDetails(); });
-$("#newNoteButton").click(function() { newNote(); });
-$("#downloadEventsButton").click(function() { downloadEvents(); });
-$("#downloadDiagramButton").click(function() { downloadDiagram(); });
-$("#downloadOpnotesButton").click(function() { downloadOpnotes(); });
+$('#play').click(function() { toggleAnimateSlider(); });
+$('#toolsTab').click(function() { toggleToolbar('tools'); });
+$('#tasksTab').click(function() { toggleToolbar('tasks'); });
+$('#notesTab').click(function() { toggleToolbar('notes'); });
+$('#filesTab').click(function() { toggleToolbar('files'); });
+$('#eventsTab').click(function() { toggleTable('events'); });
+$('#opnotesTab').click(function() { toggleTable('opnotes'); });
+$('#chatTab').click(function() { toggleTable('chat'); });
+$('#settingsTab').click(function() { toggleTable('settings'); });
+$('#propName').change(function() { updatePropName(this.value) });
+$('#lockObject').change(function() { toggleObjectLock($('#lockObject').is(':checked')) });
+$('#zoomInButton').click(function() { zoomIn(); });
+$('#zoomOutButton').click(function() { zoomOut(); });
+$('#closeToolbarButton').click(closeToolbar);
+$('#cancelLinkButton').click(cancelLink);
+$('#editDetailsButton').click(function() { editDetails(); });
+$('#newNoteButton').click(function() { newNote(); });
+$('#downloadEventsButton').click(function() { downloadEvents(); });
+$('#downloadDiagramButton').click(function() { downloadDiagram(); });
+$('#downloadOpnotesButton').click(function() { downloadOpnotes(); });
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_tasks') !== -1) {
     tasks_rw = true;
-    $("#hostTasks").prop('disabled', false);
-    $("#networkTasks").prop('disabled', false);
-    $("#ccirs").prop('disabled', false);
+    $('#hostTasks').prop('disabled', false);
+    $('#networkTasks').prop('disabled', false);
+    $('#ccirs').prop('disabled', false);
 }
 // more permissions stuff
 var events_rw = false;
@@ -101,6 +104,24 @@ if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_notes') !==
         $("#newNoteButton").prop('disabled', false);
 }
 
+// toastr
+toastr.options = {
+  "closeButton": true,
+  "debug": false,
+  "newestOnTop": false,
+  "progressBar": false,
+  "positionClass": "toast-top-center",
+  "preventDuplicates": true,
+  "onclick": null,
+  "showDuration": "300",
+  "hideDuration": "1000",
+  "timeOut": "5000",
+  "extendedTimeOut": "1000",
+  "showEasing": "swing",
+  "hideEasing": "linear",
+  "showMethod": "fadeIn",
+  "hideMethod": "fadeOut"
+}
 
 // ---------------------------- FABRIC CANVASES ----------------------------------
 MAXWIDTH=2000;
@@ -572,6 +593,7 @@ fabric.util.addListener(canvas.upperCanvasEl, 'dblclick', function (e) {
             $('#propID').val(o.id);
             $('#propFillColor').val(o.fill);
             $('#propFillColor').data('paletteColorPickerPlugin').reload();
+            $('#lockObject').prop('checked', o.locked);
             $('#propStrokeColor').val(o.stroke);
             $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
             $('#propName').val('');
@@ -619,6 +641,7 @@ function updateSelection(options) {
                 $('#propFillColor').data('paletteColorPickerPlugin').reload();
                 $('#propStrokeColor').val(o.stroke);
                 $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
+                $('#lockObject').prop('checked', o.locked);
                 $('#propName').val('');
                 if (o.children !== undefined) {
                     for (var i = 0; i < o.children.length; i++) {
@@ -794,6 +817,8 @@ function addChatMessage(msg, bulk) {
             if (!bulk && activeChannel ===  msg.messages[i].channel)
                 newMsg.hide();
             newMsg.appendTo(pane);
+            if (!bulk && msg.messages[i].channel !== 'log' && user_id != msg.messages[i].user_id)
+                toastr.info(msg.messages[i].text, msg.messages[i].analyst)
             if (!bulk && activeChannel !== msg.messages[i].channel) {
                 if (!unreadMessages[msg.messages[i].channel])
                     unreadMessages[msg.messages[i].channel] = 1;
@@ -1187,6 +1212,13 @@ function addZero(i) {
     return i;
 }
 
+function setObjectLock(o, l) {
+    if (l) 
+        o.set({lockMovementX: true, lockMovementY: true, lockScalingX: true, lockScalingY: true, lockRotation: true});
+    else
+        o.set({lockMovementX: false, lockMovementY: false, lockScalingX: false, lockScalingY: false, lockRotation: false});
+}
+
 function addObjectToCanvas(o, selected) {
     if (o.type === 'link') {
         var fromObject = null;
@@ -1222,6 +1254,7 @@ function addObjectToCanvas(o, selected) {
             strokeWidth: 3,
             hasControls: false,
             selctable: true,
+            locked: true,
             lockMovementX: true,
             lockMovementY: true,
             lockScalingX: true,
@@ -1270,11 +1303,13 @@ function addObjectToCanvas(o, selected) {
                     originY: 'top',
                     left: o.x,
                     top: o.y,
-                    lockMovementX: !diagram_rw,
-                    lockMovementY: !diagram_rw,
-                    lockScalingX: !diagram_rw,
-                    lockScalingY: !diagram_rw,
-                    lockRotation: !diagram_rw
+                    locked: o.locked,
+                    hasControls: !o.locked,
+                    lockMovementX: !diagram_rw ? false : o.locked,
+                    lockMovementY: !diagram_rw ? false : o.locked,
+                    lockScalingX: !diagram_rw ? false : o.locked,
+                    lockScalingY: !diagram_rw ? false : o.locked,
+                    lockRotation: !diagram_rw ? false : o.locked
                 });
                 if (shape._objects && !shape.image.includes('static')) {
                     for (var i = 0; i < shape._objects.length; i++) {
@@ -1338,11 +1373,13 @@ function addObjectToCanvas(o, selected) {
                 originY: 'top',
                 left: o.x,
                 top: o.y,
-                lockMovementX: !diagram_rw,
-                lockMovementY: !diagram_rw,
-                lockScalingX: !diagram_rw,
-                lockScalingY: !diagram_rw,
-                lockRotation: !diagram_rw
+                locked: o.locked,
+                hasControls: !o.locked,
+                lockMovementX: !diagram_rw ? false : o.locked,
+                lockMovementY: !diagram_rw ? false : o.locked,
+                lockScalingX: !diagram_rw ? false : o.locked,
+                lockScalingY: !diagram_rw ? false : o.locked,
+                lockRotation: !diagram_rw ? false : o.locked
             });
         } else if (shape === 'circle') {
             shape = new fabric.Ellipse({
@@ -1361,11 +1398,13 @@ function addObjectToCanvas(o, selected) {
                 originY: 'top',
                 left: o.x,
                 top: o.y,
-                lockMovementX: !diagram_rw,
-                lockMovementY: !diagram_rw,
-                lockScalingX: !diagram_rw,
-                lockScalingY: !diagram_rw,
-                lockRotation: !diagram_rw
+                locked: o.locked,
+                hasControls: !o.locked,
+                lockMovementX: !diagram_rw ? false : o.locked,
+                lockMovementY: !diagram_rw ? false : o.locked,
+                lockScalingX: !diagram_rw ? false : o.locked,
+                lockScalingY: !diagram_rw ? false : o.locked,
+                lockRotation: !diagram_rw ? false : o.locked
             });
         } else
             return;
@@ -1416,7 +1455,7 @@ function insertObject() {
         var center = new fabric.Point(canvas.width / 2, canvas.height / 2);
         lastFillColor = $('#propFillColor').val();
         lastStrokeColor = $('#propStrokeColor').val();
-        diagram.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom() - settings.x / canvas.getZoom()), y: Math.round(center.y / canvas.getZoom() - settings.y / canvas.getZoom()), z: canvas.getObjects().length}, msgId: msgHandler()})); 
+        diagram.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), locked: $('#lockObject').is(':checked'), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom() - settings.x / canvas.getZoom()), y: Math.round(center.y / canvas.getZoom() - settings.y / canvas.getZoom()), z: canvas.getObjects().length}, msgId: msgHandler()})); 
     }
 }
 
@@ -1496,6 +1535,14 @@ function updatePropName(name) {
     }
 }
 
+function toggleObjectLock(l) {
+    var o = canvas.getActiveObject();
+    if (o) {
+        o.locked = l;
+        changeObject(o);
+    }
+}
+
 function updatePropFillColor(color) {
     var o = canvas.getActiveObject();
     if (o) {
@@ -1528,6 +1575,7 @@ function changeObject(o) {
     tempObj.fill_color = o.fill;
     tempObj.stroke_color = o.stroke;
     tempObj.image = o.image;
+    tempObj.locked = o.locked;
     tempObj.name = '';
     for (var i=0; i < o.children.length; i++) {
         if (o.children[i].objType === 'name') {
@@ -1627,6 +1675,7 @@ function openToolbar(mode) {
                 $('#propFillColor').data('paletteColorPickerPlugin').reload();
                 $('#propStrokeColor').val(lastStrokeColor);
                 $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
+                $('#lockObject').prop('checked', false);
                 $('#propType').val('icon');
                 $('#prop-icon').val('00-000-icon-hub.png');
                 $('#prop-icon').data('picker').sync_picker_with_select();
@@ -1911,6 +1960,7 @@ function saveRow(type, table, id, prefix) {
 }
 
 $(document).ready(function() {
+
     startTime();
     $('.modal-dialog').draggable({ handle: '.modal-header' });
     $('.modal-content').resizable({ minHeight: 153, minWidth: 300});
