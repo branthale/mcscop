@@ -65,6 +65,8 @@ $('#chatTab').click(function() { toggleTable('chat'); });
 $('#settingsTab').click(function() { toggleTable('settings'); });
 $('#propName').change(function() { updatePropName(this.value) });
 $('#lockObject').change(function() { toggleObjectLock($('#lockObject').is(':checked')) });
+$('#objectWidth').change(function() { setObjectSize(); });
+$('#objectHeight').change(function() { setObjectSize(); });
 $('#zoomInButton').click(function() { zoomIn(); });
 $('#zoomOutButton').click(function() { zoomOut(); });
 $('#closeToolbarButton').click(closeToolbar);
@@ -133,7 +135,11 @@ fabric.Object.prototype.transparentCorners = false;
 fabric.Object.prototype.cornerSize = 7;
 fabric.Object.prototype.objectCaching = true;
 fabric.Object.prototype.noScaleCache = false;
-fabric.Object.NUM_FRACTION_DIGITS = 10;
+fabric.Object.prototype.NUM_FRACTION_DIGITS = 0;
+fabric.Object.prototype.lockScalingFlip = true;
+fabric.Group.prototype.hasControls = false;
+fabric.Group.prototype.lockScalingX = true;
+fabric.Group.prototype.lockScalingY = true;
 var canvas = new fabric.Canvas('canvas', {
     preserveObjectStacking: true,
     renderOnAddRemove: false,
@@ -318,6 +324,8 @@ function drawAlignmentGuides(o, snap) {
     var bAligned = false;
     var lAligned = false;
     var rAligned = false;
+    var hAlignedObjects = [];
+    var vAlignedObjects = [];
     for (var i = 0; i < canvas.getObjects().length; i++) {
         if (canvas.item(i).isOnScreen() && (canvas.item(i).objType && canvas.item(i).objType === 'icon' || canvas.item(i).objType && canvas.item(i).objType === 'shape') && canvas.getActiveObjects().indexOf(canvas.item(i)) === -1) {
             // middle vert alignment guide
@@ -334,13 +342,12 @@ function drawAlignmentGuides(o, snap) {
                         objType: 'guide',
                         stroke: '#66bfff',
                         strokeColor: '#66bfff',
+                        strokeDashArray: [2,2],
                         strokeWidth: 1,
                         selectable: false,
                         evented: false
                     });
-                    tempLink = line;
                     canvas.add(line);
-                    tempLinks.push(tempLink);
                     o.vGuide = line;
                 }
             }
@@ -358,13 +365,12 @@ function drawAlignmentGuides(o, snap) {
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
+                        strokeDashArray: [2,2],
                         strokeWidth: 1,
                         selectable: false,
                         evented: false
                     });
-                    tempLink = line;
                     canvas.add(line);
-                    tempLinks.push(tempLink);
                     o.lGuide = line;
                 }
             }
@@ -381,38 +387,40 @@ function drawAlignmentGuides(o, snap) {
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
+                        strokeDashArray: [2,2],
                         strokeWidth: 1,
                         selectable: false,
                         evented: false
                     });
-                    tempLink = line;
                     canvas.add(line);
-                    tempLinks.push(tempLink);
                     o.rGuide = line;
                 }
             }
             // middle horiz alignment guide
-            if (!hAligned && (Math.round(getObjCtr(canvas.item(i)).y) <= Math.round(getObjCtr(o).y) + snap && Math.round(getObjCtr(canvas.item(i)).y) >= Math.round(getObjCtr(o).y) - snap)) {
-                if (snap > 1)
-                    o.set({
-                        top: Math.round(canvas.item(i).top + (canvas.item(i).height * canvas.item(i).scaleY) / 2 - (o.height * o.scaleY) / 2)
-                    });
-                hAligned = true;
-                hSnap = 0;
-                if (!o.hGuide) {
-                    var line = new fabric.Line([-canvas.viewportTransform[4] / zoom, getObjCtr(o).y, (-canvas.viewportTransform[4] + canvas.width) / zoom, getObjCtr(o).y], {
-                        dad: o,
-                        objType: 'guide',
-                        stroke: '#66bfff',
-                        strokeColor: '#66bfff',
-                        strokeWidth: 1,
-                        selectable: false,
-                        evented: false
-                    });
-                    tempLink = line;
-                    canvas.add(line);
-                    tempLinks.push(tempLink);
-                    o.hGuide = line;
+            if (Math.round(getObjCtr(canvas.item(i)).y) <= Math.round(getObjCtr(o).y) + snap && Math.round(getObjCtr(canvas.item(i)).y) >= Math.round(getObjCtr(o).y) - snap) {
+                if (canvas.item(i).left + canvas.item(i).width * canvas.item(i).scaleX < o.left || canvas.item(i).left > o.left + o.width * o.scaleX)
+                    hAlignedObjects.push(canvas.item(i));
+                if (!hAligned) {
+                    if (snap > 1)
+                        o.set({
+                            top: Math.round(canvas.item(i).top + (canvas.item(i).height * canvas.item(i).scaleY) / 2 - (o.height * o.scaleY) / 2)
+                        });
+                    hAligned = true;
+                    hSnap = 0;
+                    if (!o.hGuide) {
+                        var line = new fabric.Line([-canvas.viewportTransform[4] / zoom, getObjCtr(o).y, (-canvas.viewportTransform[4] + canvas.width) / zoom, getObjCtr(o).y], {
+                            dad: o,
+                            objType: 'guide',
+                            stroke: '#66bfff',
+                            strokeColor: '#66bfff',
+                            strokeDashArray: [2,2],
+                            strokeWidth: 1,
+                            selectable: false,
+                            evented: false
+                        });
+                        canvas.add(line);
+                        o.hGuide = line;
+                    }
                 }
             }
             // top alignment guide
@@ -429,13 +437,12 @@ function drawAlignmentGuides(o, snap) {
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
+                        strokeDashArray: [2,2],
                         strokeWidth: 1,
                         selectable: false,
                         evented: false
                     });
-                    tempLink = line;
                     canvas.add(line);
-                    tempLinks.push(tempLink);
                     o.tGuide = line;
                 }
             }
@@ -452,19 +459,30 @@ function drawAlignmentGuides(o, snap) {
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
+                        strokeDashArray: [2,2],
                         strokeWidth: 1,
                         selectable: false,
                         evented: false
                     });
-                    tempLink = line;
                     canvas.add(line);
-                    tempLinks.push(tempLink);
                     o.bGuide = line;
                 }
             }
-
         }
     }
+    /*
+    hAlignedObjects.sort(function(a,b) {return (a.left < b.left) ? 1 : ((b.left < a.left) ? -1 : 0);} );
+    if (hAlignedObjects.length > 1 && Math.round(getObjCtr(hAlignedObjects[0]).x) - Math.round(getObjCtr(hAlignedObjects[1]).x) === Math.round(getObjCtr(o).x) - Math.round(getObjCtr(hAlignedObjects[0]).x)) {
+        var line = new fabric.Line([getObjCtr(o).x, getObjCtr(o).y - 10, getObjCtr(o).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+        canvas.add(line);
+        line = new fabric.Line([getObjCtr(hAlignedObjects[0]).x, getObjCtr(o).y - 10, getObjCtr(hAlignedObjects[0]).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+        canvas.add(line);
+        line = new fabric.Line([getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y - 10, getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+        line = new fabric.Line([getObjCtr(o).x, getObjCtr(o).y, getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+        canvas.add(line);
+    }
+    console.log(hAlignedObjects); FIXME
+    */
     if (!lAligned && o.lGuide) {
         canvas.remove(o.lGuide);
         delete o.lGuide;
@@ -495,10 +513,10 @@ function drawAlignmentGuides(o, snap) {
 canvas.on('object:moving', function(options) {
     var o = options.target;
     var grid = 1;
-    //o.set({
-    //    left: Math.round(o.left / grid) * grid,
-    //    top: Math.round(o.top / grid) * grid
-    //});
+    o.set({
+        left: Math.round(o.left / grid) * grid,
+        top: Math.round(o.top / grid) * grid
+    });
     var zoom = canvas.getZoom();
     var tmod = 0;
     var lmod = 0;
@@ -527,6 +545,8 @@ canvas.on('object:scaling', function(options) {
         tmod = options.target.top + options.target.height/2;
         lmod = options.target.left + options.target.width/2;
     }
+    $('#objectWidth').val(Math.round(o.width * o.scaleX));
+    $('#objectHeight').val(Math.round(o.height * o.scaleY));
     drawAlignmentGuides(o, 1);
     dirty = true;
     var o = canvas.getActiveObjects();
@@ -544,6 +564,12 @@ canvas.on('object:modified', function(options) {
     var o = options.target;
     var tmod = 0;
     var lmod = 0;
+    if (options.target.objType === 'icon') {
+        options.target.set({scaleX: Math.round(options.target.width * options.target.scaleX) / options.target.width, scaleY: Math.round(options.target.height * options.target.scaleY) / options.target.height});
+    } else if (options.target.objType === 'shape') {
+        options.target.set({width: Math.round(options.target.width), height: Math.round(options.target.height)});
+    }
+    options.target.set({left: Math.round(options.target.left), top: Math.round(options.target.top)});
     if (canvas.getActiveObjects().length > 1) {
         tmod = options.target.top + options.target.height/2;
         lmod = options.target.left + options.target.width/2;
@@ -641,6 +667,8 @@ function updateSelection(options) {
                 $('#propFillColor').data('paletteColorPickerPlugin').reload();
                 $('#propStrokeColor').val(o.stroke);
                 $('#propStrokeColor').data('paletteColorPickerPlugin').reload();
+                $('#objectWidth').val(Math.round(o.width * o.scaleX));
+                $('#objectHeight').val(Math.round(o.height * o.scaleY));
                 $('#lockObject').prop('checked', o.locked);
                 $('#propName').val('');
                 if (o.children !== undefined) {
@@ -681,7 +709,7 @@ canvas.on('object:selected', function(options) {
 });
 
 canvas.on('before:selection:cleared', function(options) {
-    if (!updatingObject)
+    if (!updatingObject && canvas.getActiveObjects().length < 1)
         closeToolbar();
 });
 
@@ -1109,12 +1137,6 @@ function dateStringToEpoch(value) {
     return(d.getTime());
 }
 
-// temp
-//canvas.add(new fabric.Line([-1950,-1950,1950,-1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
-//canvas.add(new fabric.Line([-1950,-1950,-1950,1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
-//canvas.add(new fabric.Line([1950,-1950,1950,1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
-//canvas.add(new fabric.Line([1950,1950,-1950,1950],{ stroke: "#ff0000", strokeWidth: 1, selectable:false}));
-
 function startPan(event) {
     if (event.button != 2) {
         return;
@@ -1213,10 +1235,7 @@ function addZero(i) {
 }
 
 function setObjectLock(o, l) {
-    if (l) 
-        o.set({lockMovementX: true, lockMovementY: true, lockScalingX: true, lockScalingY: true, lockRotation: true});
-    else
-        o.set({lockMovementX: false, lockMovementY: false, lockScalingX: false, lockScalingY: false, lockRotation: false});
+    o.set({hasControls: !l, lockMovementX: l, lockMovementY: l, lockScalingX: l, lockScalingY: l, lockRotation: l});
 }
 
 function addObjectToCanvas(o, selected) {
@@ -1543,6 +1562,27 @@ function toggleObjectLock(l) {
     }
 }
 
+function setObjectSize() {
+    var o = canvas.getActiveObject();
+    if (o) {
+        if (o.objType === 'icon') {
+            o.set('scaleX', $('#objectWidth').val() / o.width);
+            o.set('scaleY', $('#objectHeight').val() / o.height);
+        } else if (o.objType === 'shape') {
+            o.set('width', $('#objectWidth').val());
+            o.set('height', $('#objectHeight').val());
+            o.resizeToScale();
+            o.setCoords();
+            for (var j = 0; j < o.children.length; j++) {
+                o.children[j].set('top', o.top + o.height * o.scaleY + 4);
+                o.children[j].set('left', o.left + (o.width * o.scaleX)/2);
+                o.children[j].setCoords();
+            }
+        }
+        changeObject(o);
+    }
+}
+
 function updatePropFillColor(color) {
     var o = canvas.getActiveObject();
     if (o) {
@@ -1649,6 +1689,10 @@ function openToolbar(mode) {
             $('#filesForm').hide();
             $('#propFillColorSpan').show();
             if (canvas.getActiveObject()) {
+                if (canvas.getActiveObjects().length > 1)
+                    $("#toolbar-body").addClass("disabled-div");
+                else
+                    $("#toolbar-body").removeClass("disabled-div");
                 if (diagram_rw)
                     $('#toolbarTitle').html('Edit Object');
                 else
@@ -1661,12 +1705,20 @@ function openToolbar(mode) {
                 $('#newObjectButton').show();
                 $('#propObjectGroup').tabs('disable');
                 var objType = $('#propType').val();
-                if (objType === 'link')
+                if (objType === 'link') {
+                    $('#sizeObject').hide();
+                    $('#lockObjectGroup').hide();
                     $('#propFillColorSpan').hide();
+                } else {
+                    $('#sizeObject').show();
+                    $('#lockObjectGroup').show();
+                }
                 var index = $('#propObjectGroup a[href="#tabs-' + objType + '"]').parent().index();
+                $('#moveObject').show();
                 $('#propObjectGroup').tabs('enable', index);
                 $('#propObjectGroup').tabs('option', 'active', index);
             } else if (canvas.getActiveObject() === undefined || canvas.getActiveObject() === null) {
+                $("#toolbar-body").removeClass("disabled-div");
                 $('#toolbarTitle').html('New Object');
                 $('#propID').val('');
                 $('#propNameGroup').show();
@@ -1681,6 +1733,7 @@ function openToolbar(mode) {
                 $('#prop-icon').data('picker').sync_picker_with_select();
                 $('#propObjectGroup').tabs('enable');
                 $('#propObjectGroup').tabs('option', 'active', 0);
+                $('#moveObject').hide();
                 $('#newObjectButton').hide();
                 $('#editDetailsButton').hide();
                 $('#deleteObjectButton').hide();
@@ -2126,6 +2179,7 @@ $(document).ready(function() {
                             addObjectToCanvas(o, selected);
                             canvas.renderAll();
                         } else if (o.type === 'shape' || o.type === 'link') {
+                            setObjectLock(canvas.item(i), o.locked);
                             if (o.type === 'link' && o.stroke_color === '') // don't let links disappear
                                 o.stroke_color = '#000000';
                             if (canvas.item(i).name_val !== o.name) {

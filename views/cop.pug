@@ -97,10 +97,14 @@ html
                     each link in links
                       option(data-img-src="images/links/" + link, data-img-class="first", value=link) link
               div.form-group#moveObject
-                  div.checkbox
+                  div.checkbox#lockObjectGroup
                     label
                       input(type="checkbox", value="0" disabled)#lockObject
                       | Locked?
+                  div#sizeObject.input-group
+                    input(type="number" min="0" max="1000")#objectWidth.form-control
+                    span.input-group-addon x
+                    input(type="number" min="0" max="1000")#objectHeight.form-control
                   button.propButton.btn.btn-default#moveUp(type='button' disabled) Up
                   button.propButton.btn.btn-default#moveDown(type='button' disabled) Down
                   button.propButton.btn.btn-default#moveToFront(type='button' disabled) Front
