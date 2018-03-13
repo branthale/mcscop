@@ -748,36 +748,47 @@ ws.on('connection', function(socket) {
                     break;
                 case 'move_object':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        var o = msg.arg;
-                        o.z = Math.floor(o.z);
-                        connection.query('SELECT id FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function (err, results) {
-                            var zs = [];
-                            for (var i = 0; i < results.length; i++)
-                                zs.push(results[i].id);
-                            if (o.z !== zs.indexOf(o.id)) {
-                                zs.move(zs.indexOf(o.id), o.z);
-                                async.forEachOf(zs, function(item, index, callback) {
-                                    connection.query('UPDATE objects SET z = ? WHERE id = ?', [index, item], function (err, results) {
-                                        if (err)
-                                            console.log(err);
-                                        callback();
+                        if (msg.arg.length === 1 && msg.arg[0].z !== undefined) {
+                            var o = msg.arg[0];
+                            o.z = Math.floor(o.z);
+                            connection.query('SELECT id FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function (err, results) {
+                                var zs = [];
+                                for (var i = 0; i < results.length; i++)
+                                    zs.push(results[i].id);
+                                if (o.z !== zs.indexOf(o.id)) {
+                                    zs.move(zs.indexOf(o.id), o.z);
+                                    async.forEachOf(zs, function(item, index, callback) {
+                                        connection.query('UPDATE objects SET z = ? WHERE id = ?', [index, item], function (err, results) {
+                                            if (err)
+                                                console.log(err);
+                                            callback();
+                                        });
+                                    }, function(err) {
+                                        sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
                                     });
-                                }, function(err) {
-                                    sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
-                                });
-                            } else  {
+                                }
+                            });
+                        } else {
+                            var args = [];
+                            async.eachOf(msg.arg, function(o, index, callback) {
                                 if (o.type !== undefined && (o.type === 'icon' || o.type === 'shape')) {
                                     o.x = Math.round(o.x);
                                     o.y = Math.round(o.y);
                                     connection.query('UPDATE objects SET x = ?, y = ?, scale_x = ?, scale_y = ?, rot = ? WHERE id = ?', [o.x, o.y, o.scale_x, o.scale_y, o.rot, o.id], function (err, results) {
                                         if (!err) {
-                                            sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}), socket);
+                                            args.push(o);
                                         } else
                                             console.log(err);
+                                        callback();
                                     });
                                 }
-                            }
-                        });
+                            }, function (err) {
+                                if (err)
+                                    console.log(err);
+                                else
+                                    sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: args}), socket);
+                            });
+                        }
                     }
                     break;
                 case 'change_link':

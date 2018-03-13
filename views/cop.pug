@@ -34,6 +34,11 @@ html
           div#zoom-buttons
             button.zoomIn#zoomInButton.ui-icon.ui-icon-zoomin
             button.zoomOut#zoomOutButton.ui-icon.ui-icon-zoomout
+            div.input-group.objectSearchBar
+              input(type="text", placeholder="Search...").form-control#objectSearch
+              span.input-group-btn
+                button.btn.btn-default#prevObjectSearch &#8249;
+                button.btn.btn-default#nextObjectSearch &#8250;
             button.cancelLink#cancelLinkButton Cancel Link
           div#minimap
             canvas#minimapBgCanvas

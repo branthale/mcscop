@@ -69,6 +69,9 @@ $('#objectWidth').change(function() { setObjectSize(); });
 $('#objectHeight').change(function() { setObjectSize(); });
 $('#zoomInButton').click(function() { zoomIn(); });
 $('#zoomOutButton').click(function() { zoomOut(); });
+$('#objectSearch').change(function() { objectSearch(this.value) });
+$('#nextObjectSearch').click(function() { nextObjectSearch(); });
+$('#prevObjectSearch').click(function() { nextObjectSearch(); });
 $('#closeToolbarButton').click(closeToolbar);
 $('#cancelLinkButton').click(cancelLink);
 $('#editDetailsButton').click(function() { editDetails(); });
@@ -135,7 +138,7 @@ fabric.Object.prototype.transparentCorners = false;
 fabric.Object.prototype.cornerSize = 7;
 fabric.Object.prototype.objectCaching = true;
 fabric.Object.prototype.noScaleCache = false;
-fabric.Object.prototype.NUM_FRACTION_DIGITS = 0;
+fabric.Object.NUM_FRACTION_DIGITS = 10;
 fabric.Object.prototype.lockScalingFlip = true;
 fabric.Group.prototype.hasControls = false;
 fabric.Group.prototype.lockScalingX = true;
@@ -184,6 +187,8 @@ var activeToolbar = null;
 var activeTable = 'events';
 var activeChannel = 'log';
 var chatPosition = {};
+var objectSearchResults = [];
+var objectSearchPtr = null;
 var firstChat = true;
 var unreadMessages = {};
 var cellEdit = null;
@@ -599,17 +604,18 @@ canvas.on('object:modified', function(options) {
         delete o.vGuide;
     }
     o = canvas.getActiveObjects();
+    var args = []
     for (var i = 0; i < o.length; i++) {
-        var z = canvas.getObjects().indexOf(o[i])/2;
         if (o[i].objType === 'link')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, z: z}, msgId: msgHandler()}));
+            args.push({id: o[i].id, type: o[i].objType});
         else if (o[i].objType === 'icon') {
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, z: z, scale_x: o[i].scaleX, scale_y: o[i].scaleY, rot: o[i].angle}, msgId: msgHandler()}));
+            args.push({id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, scale_x: o[i].scaleX, scale_y: o[i].scaleY, rot: o[i].angle});
         }
         else if (o[i].objType === 'shape')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, z: z, scale_x: o[i].width, scale_y: o[i].height, rot: o[i].angle}, msgId: msgHandler()}));
+            args.push({id: o[i].id, type: o[i].objType, x: lmod + o[i].left, y: tmod + o[i].top, scale_x: o[i].width, scale_y: o[i].height, rot: o[i].angle});
         updateMinimapBg();
     }
+    diagram.send(JSON.stringify({act: 'move_object', arg: args, msgId: msgHandler()}));
 });
 
 fabric.util.addListener(canvas.upperCanvasEl, 'dblclick', function (e) {
@@ -638,6 +644,14 @@ fabric.util.addListener(canvas.upperCanvasEl, 'dblclick', function (e) {
         closeToolbar();
     }
 });
+
+function testit() {
+    for (i = 0; i < 25; i++) {
+        for (j=0; j<25; j++) {
+            diagram.send(JSON.stringify({act: 'insert_object', arg: {name:"blark" + i + j, type: 'icon', image: "04-021-icon-business.firewall.svg", fill_color: "#ffffff", x: (i * 40), y: (j * 40), locked: false}, msgId: msgHandler()}));
+        }
+    }
+}
 
 function updateSelection(options) {
     var o = options.target;
@@ -693,7 +707,7 @@ canvas.on('selection:created', function(options) {
     if (canvas.getActiveObjects().length > 1) {
         closeToolbar();
         for (var i = options.selected.length - 1; i >= 0; i--) {
-            if (options.selected[i].objType === 'link') {
+            if (options.selected[i].objType === 'link' || options.selected[i].locked) {
                 canvas.getActiveObject().removeWithUpdate(options.selected[i]);
             }
         }
@@ -822,7 +836,7 @@ function checkIfObjectsLoaded() {
 
 //https://stackoverflow.com/questions/11832914/round-to-at-most-2-decimal-places-only-if-necessary
 Number.prototype.round = function(places) {
-  return +(Math.round(this + "e+" + places)  + "e-" + places);
+    return +(Math.round(this + "e+" + places)  + "e-" + places);
 }
 
 // ---------------------------- CHAT / LOG WINDOW  ----------------------------------
@@ -1037,6 +1051,44 @@ function updateMinimapBg() {
         if (canvas.item(i).objType === 'icon' || canvas.item(i).objType === 'shape') {
             minimapBgCtx.fillRect((MAXWIDTH + canvas.item(i).left) * scaleX, (MAXHEIGHT + canvas.item(i).top) * scaleY, 2, 2);
         }
+    }
+}
+
+function objectSearch(s) {
+    objectSearchResults = [];
+    objectSearchPtr = 0;
+    for (var i = 0; i < canvas.getObjects().length; i++) {
+        if (canvas.item(i).name_val !== undefined && canvas.item(i).name_val.toLowerCase().indexOf(s.toLowerCase()) !== -1) {
+            objectSearchResults.push(canvas.item(i));
+        }
+    }
+    nextObjectSearch();
+}
+
+function focusObject(o) {
+    var center = getObjCtr(o);
+    center.x = center.x * canvas.getZoom() - canvas.width / 2 + $('#toolbar').width() / 2;
+    center.y = center.y * canvas.getZoom() - canvas.height / 2;
+    canvas.absolutePan(center);
+    updateMinimap();
+    updateSettings();
+}
+
+function nextObjectSearch() {
+    if (objectSearchResults.length > 0) {
+        objectSearchPtr ++;
+        if (objectSearchPtr >= objectSearchResults.length || objectSearchPtr < 0)
+            objectSearchPtr = 0;
+        focusObject(objectSearchResults[objectSearchPtr]);
+    }
+}
+
+function nextObjectSearch() {
+    if (objectSearchResults.length > 0) {
+        objectSearchPtr --;
+        if (objectSearchPtr < 0)
+            objectSearchPtr = objectSearchResults.length - 1;
+        focusObject(objectSearchResults[objectSearchPtr]);
     }
 }
 
@@ -1356,7 +1408,7 @@ function addObjectToCanvas(o, selected) {
                     originY: 'top',
                     textAlign: 'center',
                     fill: '#000000',
-                    fontSize: 12,
+                    fontSize: 10,
                     fontFamily: 'lato',
                     left: o.x + (shape.width * shape.scaleX)/2,
                     top: o.y + shape.height * shape.scaleY + 4
@@ -1436,7 +1488,7 @@ function addObjectToCanvas(o, selected) {
             originY: 'top',
             textAlign: 'center',
             fill: '#000000',
-            fontSize: 12,
+            fontSize: 10,
             fontFamily: 'verdana',
             left: o.x + (shape.width * shape.scaleX)/2,
             top: o.y + shape.height * shape.scaleY + 4
@@ -1486,11 +1538,11 @@ function sendChatMessage(msg, channel) {
 function moveToZ(o, z) {
     if (o) {
         if (o.objType === 'link')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, z: z}, msgId: msgHandler()}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: [{id: o.id, type: o.objType, z: z}], msgId: msgHandler()}));
         else if (o.objType === 'icon')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.scaleX, scale_y: o.scaleY, rot: o.angle}, msgId: msgHandler()}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: [{id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.scaleX, scale_y: o.scaleY, rot: o.angle}], msgId: msgHandler()}));
         else if (o.objType === 'shape')
-            diagram.send(JSON.stringify({act: 'move_object', arg: {id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.width, scale_y: o.height, rot: o.angle}, msgId: msgHandler()}));
+            diagram.send(JSON.stringify({act: 'move_object', arg: [{id: o.id, type: o.objType, x: o.left, y: o.top, z: z, scale_x: o.width, scale_y: o.height, rot: o.angle}], msgId: msgHandler()}));
     }
 }
 
@@ -2200,56 +2252,51 @@ $(document).ready(function() {
                 break;
             case 'move_object':
                 dirty = true;
-                var o = msg.arg;
-                for (var i = 0; i < canvas.getObjects().length; i++) {
-                    if (canvas.item(i).id == o.id) {
-                        var obj = canvas.item(i);
-                        obj.dirty = true;
-                        if (o.type !== 'link') {
-                            obj.set('angle', o.rot);
-                            if (o.type === 'shape') {
-                                obj.set('width', o.scale_x);
-                                obj.set('height', o.scale_y);
-                            } else if (o.type === 'icon') {
-                                obj.set('scaleX', o.scale_x);
-                                obj.set('scaleY', o.scale_y);
-                            }
-                            var tmod = 0;
-                            var lmod = 0;
-                            if (canvas.getActiveObjects().length > 1 && canvas.getActiveObjects().indexOf(obj) > -1) {
-                                canvas.getActiveObject().removeWithUpdate(obj);
-                            }
-                            obj.animate({left: o.x, top: o.y}, {
-                                duration: 100,
-                                onChange: function() {
-                                    dirty = true;
-                                    obj.dirty = true;
-                                    for (var j = 0; j < obj.children.length; j++) {
-                                        obj.children[j].set('top', tmod + obj.top + obj.height * obj.scaleY + 4);
-                                        obj.children[j].set('left', lmod + obj.left + (obj.width * obj.scaleX)/2);
-                                    }
-                                    obj.setCoords();
-                                    canvas.renderAll();
-                                }, 
-                                onComplete: function() {
-                                    updateMinimapBg();
+                for (var h = 0; h < msg.arg.length; h++) {
+                    var o = msg.arg[h];
+                    for (var i = 0; i < canvas.getObjects().length; i++) {
+                        if (canvas.item(i).id == o.id) {
+                            var obj = canvas.item(i);
+                            obj.dirty = true;
+                            if (o.type !== 'link') {
+                                obj.set('angle', o.rot);
+                                if (o.type === 'shape') {
+                                    obj.set('width', o.scale_x);
+                                    obj.set('height', o.scale_y);
+                                } else if (o.type === 'icon') {
+                                    obj.set('scaleX', o.scale_x);
+                                    obj.set('scaleY', o.scale_y);
                                 }
-                           });
-                        }
-                        if (i !== o.z*2) {
-                            if (i < o.z*2) {
-                                obj.moveTo((o.z)*2 + 1);
-                                for (var k = 0; k < obj.children.length; k++)
-                                    obj.children[k].moveTo(canvas.getObjects().indexOf(obj));
-                            } else {
-                                obj.moveTo(o.z*2);
-                                for (var k = 0; k < obj.children.length; k++)
-                                    obj.children[k].moveTo(canvas.getObjects().indexOf(obj)+1);
+                                var tmod = 0;
+                                var lmod = 0;
+                                if (canvas.getActiveObjects().length > 1 && canvas.getActiveObjects().indexOf(obj) > -1) {
+                                    canvas.getActiveObject().removeWithUpdate(obj);
+                                }
+                                obj.set({left: o.x, top: o.y});
+                                for (var j = 0; j < obj.children.length; j++) {
+                                    obj.children[j].set('top', tmod + obj.top + obj.height * obj.scaleY + 4);
+                                    obj.children[j].set('left', lmod + obj.left + (obj.width * obj.scaleX)/2);
+                                    obj.children[j].setCoords();
+                                }
+                                obj.setCoords();
                             }
+                            if (o.z !== undefined && i !== o.z*2) {
+                                if (i < o.z*2) {
+                                    obj.moveTo((o.z)*2 + 1);
+                                    for (var k = 0; k < obj.children.length; k++)
+                                        obj.children[k].moveTo(canvas.getObjects().indexOf(obj));
+                                } else {
+                                    obj.moveTo(o.z*2);
+                                    for (var k = 0; k < obj.children.length; k++)
+                                        obj.children[k].moveTo(canvas.getObjects().indexOf(obj)+1);
+                                }
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
+                canvas.renderAll();
+                updateMinimapBg();
                 break;
             case 'update_event':
                 var evt = msg.arg;
@@ -3150,4 +3197,5 @@ module.exports = {
     saveRow: saveRow,
     deleteRow: deleteRow,
     deleteRowConfirm: deleteRowConfirm,
+    testit: testit,
 };

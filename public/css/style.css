@@ -594,11 +594,11 @@ button.pane-close {
     color: white;
 }
 
-input[type="text"] {
+/*input[type="text"] {
     margin-bottom: -1px;
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;
-}
+}*/
 
 .cp-form-control {
     width: 300px;
@@ -627,6 +627,13 @@ input[type="text"] {
     left: 6px;
     bottom: 0px;
     display: none;
+}
+
+.objectSearchBar {
+    width: 300px;
+    left: 110px;
+    bottom: 0px;
+    position: absolute;
 }
 
 .zoomIn {
