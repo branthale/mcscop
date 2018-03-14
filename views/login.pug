@@ -12,6 +12,6 @@ html
           h2.form-signin-heading.text-center MCS-COP Login
           if (message)
             div.alert.alert-danger.alert-error= message
-          input(type='text' name='username' placeholder='Username').form-control
+          input(type='text' name='username' placeholder='Username' autofocus='autofocus').form-control
           input(type='password' name='password' placeholder='Password').form-control.input-password
           button.btn.btn-lg.btn-login.btn-block(type='submit') Login

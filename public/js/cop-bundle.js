@@ -57810,7 +57810,7 @@ $('#zoomInButton').click(function() { zoomIn(); });
 $('#zoomOutButton').click(function() { zoomOut(); });
 $('#objectSearch').change(function() { objectSearch(this.value) });
 $('#nextObjectSearch').click(function() { nextObjectSearch(); });
-$('#prevObjectSearch').click(function() { nextObjectSearch(); });
+$('#prevObjectSearch').click(function() { prevObjectSearch(); });
 $('#closeToolbarButton').click(closeToolbar);
 $('#cancelLinkButton').click(cancelLink);
 $('#editDetailsButton').click(function() { editDetails(); });
@@ -58795,7 +58795,7 @@ function updateMinimapBg() {
 
 function objectSearch(s) {
     objectSearchResults = [];
-    objectSearchPtr = 0;
+    objectSearchPtr = -1;
     for (var i = 0; i < canvas.getObjects().length; i++) {
         if (canvas.item(i).name_val !== undefined && canvas.item(i).name_val.toLowerCase().indexOf(s.toLowerCase()) !== -1) {
             objectSearchResults.push(canvas.item(i));
@@ -58818,16 +58818,23 @@ function nextObjectSearch() {
         objectSearchPtr ++;
         if (objectSearchPtr >= objectSearchResults.length || objectSearchPtr < 0)
             objectSearchPtr = 0;
+        $('#foundCount').text(objectSearchPtr + 1 + '/' + objectSearchResults.length);
+        $('#foundCount').show();
         focusObject(objectSearchResults[objectSearchPtr]);
+        canvas.setActiveObject(objectSearchResults[objectSearchPtr]);
+    } else {
+        $('#foundCount').hide();
     }
 }
 
-function nextObjectSearch() {
+function prevObjectSearch() {
     if (objectSearchResults.length > 0) {
         objectSearchPtr --;
         if (objectSearchPtr < 0)
             objectSearchPtr = objectSearchResults.length - 1;
+        $('#foundCount').text(objectSearchPtr + 1 + '/' + objectSearchResults.length);
         focusObject(objectSearchResults[objectSearchPtr]);
+        canvas.setActiveObject(objectSearchResults[objectSearchPtr]);
     }
 }
 
@@ -60923,6 +60930,21 @@ $(document).ready(function() {
             $("#message-input-box").val('');
         }
     });
+    // capture ctrl+f
+    window.addEventListener("keydown",function (e) {
+        if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) { 
+            e.preventDefault();
+            if (!$('#objectSearchBar').is(':visible')) {
+                $('#objectSearchBar').show().css('display', 'table');
+                $('#objectSearch').focus();
+            } else {
+                $('#foundCount').hide();
+                $('#objectSearchBar').hide();
+                $('#objectSearch').val('');
+            }
+        }
+    })
+    $('#diagram_jumbotron').focus();
     // load settings from cookie
     loadSettings();
     resizeTables();

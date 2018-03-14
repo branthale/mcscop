@@ -23,6 +23,7 @@ html
       div.clockBar#clockBar
         div
         div.clock#est
+        div(style="font-weight: 900; color: #f9ff00;") #{mission_name}
         div.clock#utc
         div
       include nav.pug
@@ -31,14 +32,15 @@ html
           canvas#background
           canvas#canvas
           div#message
+          div.input-group#objectSearchBar
+            input(type="text", placeholder="Search...").form-control#objectSearch
+            span#foundCount
+            span.input-group-btn
+              button.btn.btn-default#prevObjectSearch &#8249;
+              button.btn.btn-default#nextObjectSearch &#8250;
           div#zoom-buttons
             button.zoomIn#zoomInButton.ui-icon.ui-icon-zoomin
             button.zoomOut#zoomOutButton.ui-icon.ui-icon-zoomout
-            div.input-group.objectSearchBar
-              input(type="text", placeholder="Search...").form-control#objectSearch
-              span.input-group-btn
-                button.btn.btn-default#prevObjectSearch &#8249;
-                button.btn.btn-default#nextObjectSearch &#8250;
             button.cancelLink#cancelLinkButton Cancel Link
           div#minimap
             canvas#minimapBgCanvas

@@ -1102,19 +1102,27 @@ app.get('/cop', function (req, res) {
             fs.readdir('./public/images/icons', function(err, icons) {
                 fs.readdir('./public/images/shapes', function(err, shapes) {
                     fs.readdir('./public/images/links', function(err, links) {
-                        connection.query('SELECT role, permissions FROM mission_users_rel WHERE user_id = ? AND mission = ?', [req.session.user_id, req.query.mission], function (err, rows, fields) {
-                            if (!err && rows.length > 0) {
-                                mission_role = rows[0].role;
-                                mission_permissions = rows[0].permissions;
+                        connection.query('SELECT name FROM missions WHERE id = ? LIMIT 1', [req.query.mission], function (err, rows, fields) {
+                            if (!err) {
+                                var mission_name = rows[0].name;
+                                connection.query('SELECT role, permissions FROM mission_users_rel WHERE user_id = ? AND mission = ?', [req.session.user_id, req.query.mission], function (err, rows, fields) {
+                                    if (!err && rows.length > 0) {
+                                        mission_role = rows[0].role;
+                                        mission_permissions = rows[0].permissions;
+                                    }
+                                    if (req.session.user_id === 1)
+                                        mission_permissions = 'all'; //admin has all permissions
+                                    req.session.mission_role[req.query.mission] = mission_role;
+                                    req.session.mission_permissions[req.query.mission] = mission_permissions;
+                                    if (req.session.user_id === 1 || (mission_permissions && mission_permissions !== '')) // always let admin in
+                                        res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
+                                    else
+                                        res.redirect('login');
+                                });
+                            } else {
+                                console.log(err);
+                                res.redirect('login');
                             }
-                            if (req.session.user_id === 1)
-                                mission_permissions = 'all'; //admin has all permissions
-                            req.session.mission_role[req.query.mission] = mission_role;
-                            req.session.mission_permissions[req.query.mission] = mission_permissions;
-                            if (req.session.user_id === 1 || (mission_permissions && mission_permissions !== '')) // always let admin in
-                                res.render('cop', { title: 'MCSCOP', role: mission_role, permissions: mission_permissions, user_id: req.session.user_id, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
-                            else
-                                res.redirect('login')
                         });
                     });
                 });

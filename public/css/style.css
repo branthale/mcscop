@@ -332,6 +332,20 @@ button.pane-close {
     padding-left: 15px;
 }
 
+#foundCount {
+    position: absolute;
+    left: 305px;
+    top: 8px;
+    background: #459fcc;
+    font-size: 10px;
+    border-radius: 15px;
+    padding: 1px 10px;
+    color: #ffffff;
+    line-height: 16px;
+    z-index: 5;
+    display: none;
+}
+
 .unread {
     background: #dc5960;
     font-size: 12px;
@@ -629,11 +643,12 @@ button.pane-close {
     display: none;
 }
 
-.objectSearchBar {
+#objectSearchBar {
     width: 300px;
-    left: 110px;
-    bottom: 0px;
+    left: 10px;
+    top: 10px;
     position: absolute;
+    display: none;
 }
 
 .zoomIn {
