@@ -329,6 +329,8 @@ function drawAlignmentGuides(o, snap) {
     var bAligned = false;
     var lAligned = false;
     var rAligned = false;
+    var hSpaced = false;
+    var vSpaced = false;
     var hAlignedObjects = [];
     var vAlignedObjects = [];
     for (var i = 0; i < canvas.getObjects().length; i++) {
@@ -478,16 +480,22 @@ function drawAlignmentGuides(o, snap) {
     /*
     hAlignedObjects.sort(function(a,b) {return (a.left < b.left) ? 1 : ((b.left < a.left) ? -1 : 0);} );
     if (hAlignedObjects.length > 1 && Math.round(getObjCtr(hAlignedObjects[0]).x) - Math.round(getObjCtr(hAlignedObjects[1]).x) === Math.round(getObjCtr(o).x) - Math.round(getObjCtr(hAlignedObjects[0]).x)) {
+        o.hSGuide = [];
+        hSpaced = true;
         var line = new fabric.Line([getObjCtr(o).x, getObjCtr(o).y - 10, getObjCtr(o).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
         canvas.add(line);
+        o.hSGuide.push(line);
         line = new fabric.Line([getObjCtr(hAlignedObjects[0]).x, getObjCtr(o).y - 10, getObjCtr(hAlignedObjects[0]).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
         canvas.add(line);
+        o.hSGuide.push(line);
         line = new fabric.Line([getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y - 10, getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+        canvas.add(line);
+        o.hSGuide.push(line);
         line = new fabric.Line([getObjCtr(o).x, getObjCtr(o).y, getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
         canvas.add(line);
-    }
-    console.log(hAlignedObjects); FIXME
-    */
+        o.hSGuide.push(line);
+    }*/ //FIXME
+    console.log(hSpaced); 
     if (!lAligned && o.lGuide) {
         canvas.remove(o.lGuide);
         delete o.lGuide;
@@ -511,6 +519,11 @@ function drawAlignmentGuides(o, snap) {
     if (!vAligned && o.vGuide) {
         canvas.remove(o.vGuide);
         delete o.vGuide;
+    }
+    if (!hSpaced && o.hSGuide && o.hSGuide.length > 0) {
+        for (i = 0; i < o.hSGuide.length; i++)
+            canvas.remove(o.hSGuide[i]);
+        delete o.hSGuide;
     }
     return;
 }
@@ -2624,11 +2637,15 @@ $(document).ready(function() {
                     newformat: 'yy-mm-dd HH:mm:ss.l'
                 }
             }},
-            { label: 'Host/Device', name: 'source_object', width: 100, fixed: true, editable: opnotes_rw },
-            { label: 'Tool', name: 'tool', width: 100, fixed: true, editable: opnotes_rw },
+            { label: 'Host/Device', name: 'source_object', width: 150, fixed: true, editable: opnotes_rw },
+            { label: 'Tool', name: 'tool', width: 150, fixed: true, editable: opnotes_rw },
             { label: 'Action', name: 'action', width: 200, fixed: false, edittype: 'textarea', editable: opnotes_rw, cellattr: function (rowId, tv, rawObject, cm, rdata) {
                 return 'style="white-space: pre-wrap;"';
             }},
+            { label: 'D', width: 25, template: 'actions', fixed: false, editable: false, formatter: function(cell, options, row) {
+                    return '<div title="Details" style="float: left;" class="ui-pg-div ui-inline-cell ui-inline-save-cell" onclick="cop.editDetails(\'opnotes-' + options.rowId + '\', \'Opnote - ' + options.rowId + '\')" onmouseover="jQuery(this).addClass(\'ui-state-hover\');" onmouseout="jQuery(this).removeClass(\'ui-state-hover\');"><span class="ui-icon ui-icon-note"></span></div>';
+                }
+            },
             { label: 'Analyst', name: 'analyst', width: 100, fixed: true, editable: false },
         ],
         onSelectRow: function() {
@@ -3219,5 +3236,5 @@ module.exports = {
     saveRow: saveRow,
     deleteRow: deleteRow,
     deleteRowConfirm: deleteRowConfirm,
-    testit: testit,
+    editDetails: editDetails
 };
