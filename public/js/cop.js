@@ -77,7 +77,7 @@ $('#cancelLinkButton').click(cancelLink);
 $('#editDetailsButton').click(function() { editDetails(); });
 $('#newNoteButton').click(function() { newNote(); });
 $('#downloadEventsButton').click(function() { downloadEvents(); });
-$('#downloadDiagramButton').click(function() { downloadDiagram(); });
+$('#downloadDiagramButton').click(function() { downloadDiagram(this); });
 $('#downloadOpnotesButton').click(function() { downloadOpnotes(); });
 if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_tasks') !== -1) {
     tasks_rw = true;
@@ -148,8 +148,8 @@ var canvas = new fabric.Canvas('canvas', {
     renderOnAddRemove: false,
     enableRetinaScaling: true,
     uniScaleTransform: true,
-    width: 2000,
-    height: 2000
+    width: MAXWIDTH,
+    height: MAXHEIGHT
 });
 
 // ---------------------------- MINIMAP ----------------------------------
@@ -179,6 +179,7 @@ var vSnap = false;
 var dirty = false;
 var SVGCache = {};
 var tempLinks = [];
+var guides = {};
 var objectCache = {};
 var resizeTimer = null;
 var updateSettingsTimer = null;
@@ -336,26 +337,30 @@ function drawAlignmentGuides(o, snap) {
     for (var i = 0; i < canvas.getObjects().length; i++) {
         if (canvas.item(i).isOnScreen() && (canvas.item(i).objType && canvas.item(i).objType === 'icon' || canvas.item(i).objType && canvas.item(i).objType === 'shape') && canvas.getActiveObjects().indexOf(canvas.item(i)) === -1) {
             // middle vert alignment guide
-            if (!vAligned && (Math.ceil(getObjCtr(canvas.item(i)).x) <= Math.ceil(getObjCtr(o).x) + snap && Math.floor(getObjCtr(canvas.item(i)).x) >= Math.floor(getObjCtr(o).x) - snap)) {
-                vSnap = 0;
-                if (snap > 1)
-                    o.set({
-                        left: Math.round(canvas.item(i).left + (canvas.item(i).width * canvas.item(i).scaleX) / 2 - (o.width * o.scaleX) / 2)
-                    });
-                vAligned = true;
-                if (!o.vGuide) {
-                    var line = new fabric.Line([getObjCtr(o).x, -canvas.viewportTransform[5] / zoom, getObjCtr(o).x, (-canvas.viewportTransform[5] + canvas.height) / zoom], {
-                        dad: o,
-                        objType: 'guide',
-                        stroke: '#66bfff',
-                        strokeColor: '#66bfff',
-                        strokeDashArray: [2,2],
-                        strokeWidth: 1,
-                        selectable: false,
-                        evented: false
-                    });
-                    canvas.add(line);
-                    o.vGuide = line;
+            if (Math.round(getObjCtr(canvas.item(i)).x) <= Math.ceil(getObjCtr(o).x) + vSnap && Math.round(getObjCtr(canvas.item(i)).x) >= Math.floor(getObjCtr(o).x) - vSnap) {
+                if (canvas.item(i).top + canvas.item(i).height * canvas.item(i).scaleY < o.top || canvas.item(i).top > o.top + o.height * o.scaleY)
+                    vAlignedObjects.push(canvas.item(i));
+
+                if (!vAligned) {
+                    if (vSnap > 1)
+                        o.set({
+                            left: Math.round(canvas.item(i).left + (canvas.item(i).width * canvas.item(i).scaleX) / 2 - (o.width * o.scaleX) / 2)
+                        });
+                    vAligned = true;
+                    vSnap = 0;
+                    if (!guides.vGuide) {
+                        var line = new fabric.Line([getObjCtr(o).x, -canvas.viewportTransform[5] / zoom, getObjCtr(o).x, (-canvas.viewportTransform[5] + canvas.height) / zoom], {
+                            objType: 'guide',
+                            stroke: '#66bfff',
+                            strokeColor: '#66bfff',
+                            strokeDashArray: [2,2],
+                            strokeWidth: 1,
+                            selectable: false,
+                            evented: false
+                        });
+                        canvas.add(line);
+                        guides.vGuide = line;
+                    }
                 }
             }
             // left alignment mark
@@ -366,9 +371,8 @@ function drawAlignmentGuides(o, snap) {
                     });
                 lAligned = true;
                 vSnap = 0;
-                if (!o.lGuide) {
+                if (!guides.lGuide) {
                     var line = new fabric.Line([o.left, -canvas.viewportTransform[5] / zoom, o.left, (-canvas.viewportTransform[5] + canvas.height) / zoom], {
-                        dad: o,
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
@@ -378,7 +382,7 @@ function drawAlignmentGuides(o, snap) {
                         evented: false
                     });
                     canvas.add(line);
-                    o.lGuide = line;
+                    guides.lGuide = line;
                 }
             }
             // right alignment mark
@@ -388,9 +392,8 @@ function drawAlignmentGuides(o, snap) {
                         left: canvas.item(i).left + canvas.item(i).width * canvas.item(i).scaleX - (o.width * o.scaleX)
                     });
                 rAligned = true;
-                if (!o.rGuide) {
+                if (!guides.rGuide) {
                     var line = new fabric.Line([o.left + (o.width * o.scaleX) + 1, -canvas.viewportTransform[5] / zoom, o.left + (o.width * o.scaleX) + 1, (-canvas.viewportTransform[5] + canvas.height) / zoom], {
-                        dad: o,
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
@@ -400,23 +403,22 @@ function drawAlignmentGuides(o, snap) {
                         evented: false
                     });
                     canvas.add(line);
-                    o.rGuide = line;
+                    guides.rGuide = line;
                 }
             }
             // middle horiz alignment guide
-            if (Math.round(getObjCtr(canvas.item(i)).y) <= Math.round(getObjCtr(o).y) + snap && Math.round(getObjCtr(canvas.item(i)).y) >= Math.round(getObjCtr(o).y) - snap) {
+            if (Math.round(getObjCtr(canvas.item(i)).y) <= Math.round(getObjCtr(o).y) + hSnap && Math.round(getObjCtr(canvas.item(i)).y) >= Math.round(getObjCtr(o).y) - hSnap) {
                 if (canvas.item(i).left + canvas.item(i).width * canvas.item(i).scaleX < o.left || canvas.item(i).left > o.left + o.width * o.scaleX)
                     hAlignedObjects.push(canvas.item(i));
                 if (!hAligned) {
-                    if (snap > 1)
+                    if (hSnap > 1)
                         o.set({
                             top: Math.round(canvas.item(i).top + (canvas.item(i).height * canvas.item(i).scaleY) / 2 - (o.height * o.scaleY) / 2)
                         });
                     hAligned = true;
                     hSnap = 0;
-                    if (!o.hGuide) {
+                    if (!guides.hGuide) {
                         var line = new fabric.Line([-canvas.viewportTransform[4] / zoom, getObjCtr(o).y, (-canvas.viewportTransform[4] + canvas.width) / zoom, getObjCtr(o).y], {
-                            dad: o,
                             objType: 'guide',
                             stroke: '#66bfff',
                             strokeColor: '#66bfff',
@@ -426,21 +428,20 @@ function drawAlignmentGuides(o, snap) {
                             evented: false
                         });
                         canvas.add(line);
-                        o.hGuide = line;
+                        guides.hGuide = line;
                     }
                 }
             }
             // top alignment guide
             if (!tAligned && (Math.round(canvas.item(i).top) <= Math.round(o.top) + hSnap && Math.round(canvas.item(i).top) >= Math.round(o.top) - hSnap)) {
-                if (hSnap > 1 && !hAligned)
+                if (hSnap > 1)
                     o.set({
                         top: canvas.item(i).top
                     });
                 hSnap = 0;
                 tAligned = true;
-                if (!o.tGuide) {
+                if (!guides.tGuide) {
                     var line = new fabric.Line([-canvas.viewportTransform[4] / zoom, o.top, (-canvas.viewportTransform[4] + canvas.width) / zoom, o.top], {
-                        dad: o,
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
@@ -450,19 +451,19 @@ function drawAlignmentGuides(o, snap) {
                         evented: false
                     });
                     canvas.add(line);
-                    o.tGuide = line;
+                    guides.tGuide = line;
                 }
             }
             // bottom alignment guide
             if (!bAligned && (Math.round(canvas.item(i).top + canvas.item(i).height * canvas.item(i).scaleY) <= Math.round(o.top + (o.height * o.scaleY)) + hSnap && Math.round(canvas.item(i).top + canvas.item(i).height * canvas.item(i).scaleY) >= Math.round(o.top + (o.height * o.scaleY)) - hSnap)) {
-                if (hSnap > 1 && !hAligned && !bAligned)
+                if (hSnap > 1)
                     o.set({
                         top: canvas.item(i).top + canvas.item(i).height * canvas.item(i).scaleY - o.height * o.scaleY
                     });
+                hSnap = 0;
                 bAligned = true;
-                if (!o.bGuide) {
+                if (!guides.bGuide) {
                     var line = new fabric.Line([-canvas.viewportTransform[4] / zoom, o.top + (o.height * o.scaleY) + 1, (-canvas.viewportTransform[4] + canvas.width) / zoom, o.top + (o.height * o.scaleY) + 1], {
-                        dad: o,
                         objType: 'guide',
                         stroke: '#bf66ff',
                         strokeColor: '#bf66ff',
@@ -472,58 +473,77 @@ function drawAlignmentGuides(o, snap) {
                         evented: false
                     });
                     canvas.add(line);
-                    o.bGuide = line;
+                    guides.bGuide = line;
                 }
             }
         }
     }
-    /*
-    hAlignedObjects.sort(function(a,b) {return (a.left < b.left) ? 1 : ((b.left < a.left) ? -1 : 0);} );
-    if (hAlignedObjects.length > 1 && Math.round(getObjCtr(hAlignedObjects[0]).x) - Math.round(getObjCtr(hAlignedObjects[1]).x) === Math.round(getObjCtr(o).x) - Math.round(getObjCtr(hAlignedObjects[0]).x)) {
-        o.hSGuide = [];
-        hSpaced = true;
-        var line = new fabric.Line([getObjCtr(o).x, getObjCtr(o).y - 10, getObjCtr(o).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
-        canvas.add(line);
-        o.hSGuide.push(line);
-        line = new fabric.Line([getObjCtr(hAlignedObjects[0]).x, getObjCtr(o).y - 10, getObjCtr(hAlignedObjects[0]).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
-        canvas.add(line);
-        o.hSGuide.push(line);
-        line = new fabric.Line([getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y - 10, getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y + 10], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
-        canvas.add(line);
-        o.hSGuide.push(line);
-        line = new fabric.Line([getObjCtr(o).x, getObjCtr(o).y, getObjCtr(hAlignedObjects[1]).x, getObjCtr(o).y], { objType: 'guide', stroke: '#ff66ff', strokeColor: '#ff66ff', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
-        canvas.add(line);
-        o.hSGuide.push(line);
-    }*/ //FIXME
-    console.log(hSpaced); 
-    if (!lAligned && o.lGuide) {
-        canvas.remove(o.lGuide);
-        delete o.lGuide;
+    if (hAlignedObjects.length > 1) {
+        hAlignedObjects.push(o);
+        hAlignedObjects.sort(function(a,b) {return (a.left > b.left) ? 1 : ((b.left <= a.left) ? -1 : 0);} );
+        var idx = hAlignedObjects.indexOf(o);
+        var alignedIcons = null;
+        // right
+        if (idx > 1 && Math.round(getObjCtr(hAlignedObjects[idx - 2]).x) - Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) >= Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) - Math.round(getObjCtr(hAlignedObjects[idx]).x) - vSnap && Math.round(getObjCtr(hAlignedObjects[idx - 2]).x) - Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) <= Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) - Math.round(getObjCtr(hAlignedObjects[idx]).x) + vSnap) {
+            o.set({
+                left: Math.round(getObjCtr(hAlignedObjects[idx - 1]).x - (getObjCtr(hAlignedObjects[idx - 2]).x) + Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) - o.width / 2)
+            });
+            alignedIcons = [idx - 2, idx - 1, idx];
+            hSpaced = true;
+        } else if (idx < hAlignedObjects.length - 2 && Math.round(getObjCtr(hAlignedObjects[idx + 1]).x) - Math.round(getObjCtr(hAlignedObjects[idx + 2]).x) >= Math.round(getObjCtr(hAlignedObjects[idx]).x) - Math.round(getObjCtr(hAlignedObjects[idx + 1]).x) - vSnap && Math.round(getObjCtr(hAlignedObjects[idx + 1]).x) - Math.round(getObjCtr(hAlignedObjects[idx + 2]).x) <= Math.round(getObjCtr(hAlignedObjects[idx]).x) - Math.round(getObjCtr(hAlignedObjects[idx + 1]).x) + vSnap) {
+            o.set({
+                left: Math.round(getObjCtr(hAlignedObjects[idx + 1]).x - (Math.round(getObjCtr(hAlignedObjects[idx + 2]).x) - getObjCtr(hAlignedObjects[idx + 1]).x) - o.width / 2)
+            });
+            alignedIcons = [idx, idx + 1, idx + 2];
+            hSpaced = true;
+        } else if (idx > 0 && idx < hAlignedObjects.length - 1 && Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) - Math.round(getObjCtr(hAlignedObjects[idx]).x) >= Math.round(getObjCtr(hAlignedObjects[idx]).x) - Math.round(getObjCtr(hAlignedObjects[idx + 1]).x) - vSnap && hAlignedObjects.length - 1 && Math.round(getObjCtr(hAlignedObjects[idx - 1]).x) - Math.round(getObjCtr(hAlignedObjects[idx]).x) <= Math.round(getObjCtr(hAlignedObjects[idx]).x) - Math.round(getObjCtr(hAlignedObjects[idx + 1]).x) + vSnap) {
+            o.set({
+                left: Math.round(getObjCtr(hAlignedObjects[idx + 1]).x - (getObjCtr(hAlignedObjects[idx + 1]).x - (getObjCtr(hAlignedObjects[idx - 1]).x)) / 2 - o.width / 2)
+            });
+            alignedIcons = [idx - 1, idx, idx + 1];
+            hSpaced = true;
+        }
+        if (alignedIcons && !guides.hSGuide) {
+            var hSGuide = [];
+            var line = new fabric.Line([getObjCtr(hAlignedObjects[alignedIcons[0]]).x, getObjCtr(hAlignedObjects[alignedIcons[0]]).y - 10, getObjCtr(hAlignedObjects[alignedIcons[0]]).x, getObjCtr(hAlignedObjects[alignedIcons[0]]).y + 10], { objType: 'guide', stroke: '#ff1111', strokeColor: '#ff1111', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+            hSGuide.push(line);
+            line = new fabric.Line([getObjCtr(hAlignedObjects[alignedIcons[1]]).x, getObjCtr(hAlignedObjects[alignedIcons[1]]).y - 10, getObjCtr(hAlignedObjects[alignedIcons[1]]).x, getObjCtr(hAlignedObjects[alignedIcons[1]]).y + 10], { objType: 'guide', stroke: '#ff1111', strokeColor: '#ff1111', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+            hSGuide.push(line);
+            line = new fabric.Line([getObjCtr(hAlignedObjects[alignedIcons[2]]).x, getObjCtr(hAlignedObjects[alignedIcons[2]]).y - 10, getObjCtr(hAlignedObjects[alignedIcons[2]]).x, getObjCtr(hAlignedObjects[alignedIcons[2]]).y + 10], { objType: 'guide', stroke: '#ff1111', strokeColor: '#ff1111', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+            hSGuide.push(line);
+            line = new fabric.Line([getObjCtr(hAlignedObjects[alignedIcons[0]]).x, getObjCtr(hAlignedObjects[alignedIcons[0]]).y, getObjCtr(hAlignedObjects[alignedIcons[2]]).x, getObjCtr(hAlignedObjects[alignedIcons[2]]).y], { objType: 'guide', stroke: '#ff1111', strokeColor: '#ff1111', strokeDashArray: [2,2], strokeWidth: 2, selectable: false, evented: false });
+            hSGuide.push(line);
+            guides.hSGuide = new fabric.Group(hSGuide);
+            canvas.add(guides.hSGuide);
+        }
     }
-    if (!rAligned && o.rGuide) {
-        canvas.remove(o.rGuide);
-        delete o.rGuide;
+    if (!lAligned && guides.lGuide) {
+        canvas.remove(guides.lGuide);
+        delete guides.lGuide;
     }
-    if (!bAligned && o.bGuide) {
-        canvas.remove(o.bGuide);
-        delete o.bGuide;
+    if (!rAligned && guides.rGuide) {
+        canvas.remove(guides.rGuide);
+        delete guides.rGuide;
     }
-    if (!tAligned && o.tGuide) {
-        canvas.remove(o.tGuide);
-        delete o.tGuide;
+    if (!bAligned && guides.bGuide) {
+        canvas.remove(guides.bGuide);
+        delete guides.bGuide;
     }
-    if (!hAligned && o.hGuide) {
-        canvas.remove(o.hGuide);
-        delete o.hGuide;
+    if (!tAligned && guides.tGuide) {
+        canvas.remove(guides.tGuide);
+        delete guides.tGuide;
     }
-    if (!vAligned && o.vGuide) {
-        canvas.remove(o.vGuide);
-        delete o.vGuide;
+    if (!hAligned && guides.hGuide) {
+        canvas.remove(guides.hGuide);
+        delete guides.hGuide;
     }
-    if (!hSpaced && o.hSGuide && o.hSGuide.length > 0) {
-        for (i = 0; i < o.hSGuide.length; i++)
-            canvas.remove(o.hSGuide[i]);
-        delete o.hSGuide;
+    if (!vAligned && guides.vGuide) {
+        canvas.remove(guides.vGuide);
+        delete guides.vGuide;
+    }
+    if (!hSpaced && guides.hSGuide) {
+        canvas.remove(guides.hSGuide);
+        delete guides.hSGuide;
     }
     return;
 }
@@ -592,29 +612,11 @@ canvas.on('object:modified', function(options) {
         tmod = options.target.top + options.target.height/2;
         lmod = options.target.left + options.target.width/2;
     }
-    if (o.lGuide) {
-        canvas.remove(o.lGuide);
-        delete o.lGuide;
-    }
-    if (o.rGuide) {
-        canvas.remove(o.rGuide);
-        delete o.rGuide;
-    }
-    if (o.bGuide) {
-        canvas.remove(o.bGuide);
-        delete o.bGuide;
-    }
-    if (o.tGuide) {
-        canvas.remove(o.tGuide);
-        delete o.tGuide;
-    }
-    if (o.hGuide) {
-        canvas.remove(o.hGuide);
-        delete o.hGuide;
-    }
-    if (o.vGuide) {
-        canvas.remove(o.vGuide);
-        delete o.vGuide;
+    for (var k in guides) {
+        if (guides.hasOwnProperty(k)) {
+            canvas.remove(guides[k]);
+            delete guides[k];
+        }
     }
     o = canvas.getActiveObjects();
     var args = []
@@ -1894,8 +1896,15 @@ function startTasks() {
 
 //download diagram to png
 function downloadDiagram(link) {
+    var viewport = canvas.viewportTransform;
+    canvas.setHeight(MAXHEIGHT * 2);
+    canvas.setWidth(MAXWIDTH * 2);
+    canvas.viewportTransform = [1, 0, 0, 1, MAXWIDTH, MAXHEIGHT];
     link.href = canvas.toDataURL('png');
     link.download = 'diagram.png';
+    canvas.viewportTransform = viewport;
+    resizeCanvas();
+    canvas.renderAll();
 }
 
 //download opnotes to csv
