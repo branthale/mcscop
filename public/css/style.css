@@ -582,8 +582,7 @@ button.pane-close {
 }
 
 #newObjectButton {
-    position: relative;
-    margin-left: 75px;
+    float: right;
 }
 
 #taskGroup {
