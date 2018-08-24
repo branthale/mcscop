@@ -1,13 +1,13 @@
--- MySQL dump 10.16  Distrib 10.1.26-MariaDB, for debian-linux-gnu (x86_64)
+-- MySQL dump 10.14  Distrib 5.5.60-MariaDB, for Linux (x86_64)
 --
 -- Host: localhost    Database: mcscop
 -- ------------------------------------------------------
--- Server version	10.1.26-MariaDB-0+deb9u1
+-- Server version	5.5.60-MariaDB
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!40101 SET NAMES utf8mb4 */;
+/*!40101 SET NAMES utf8 */;
 /*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
 /*!40103 SET TIME_ZONE='+00:00' */;
 /*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
@@ -133,8 +133,8 @@ CREATE TABLE `objects` (
   `x` int(11) DEFAULT '0',
   `y` int(11) DEFAULT '0',
   `z` int(11) DEFAULT '0',
-  `obj_a` int(11) DEFAULT NULL,
-  `obj_b` int(11) DEFAULT NULL,
+  `obj_a` varchar(36) DEFAULT '1',
+  `obj_b` varchar(36) DEFAULT '1',
   `scale_x` double DEFAULT '1',
   `scale_y` double DEFAULT '1',
   `rot` double DEFAULT '0',
@@ -228,11 +228,13 @@ CREATE TABLE `users` (
   `name` varchar(100) DEFAULT '',
   `avatar` varchar(256) DEFAULT NULL,
   `permissions` varchar(256) DEFAULT '',
+  `api` varchar(64) NOT NULL,
   `deleted` tinyint(4) NOT NULL DEFAULT '0',
   `last_update` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`),
-  UNIQUE KEY `username_2` (`username`)
+  UNIQUE KEY `username_2` (`username`),
+  UNIQUE KEY `api` (`api`)
 ) ENGINE=InnoDB  DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -245,4 +247,4 @@ CREATE TABLE `users` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2018-03-11 13:26:16
+-- Dump completed on 2018-08-23 22:18:00

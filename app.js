@@ -28,6 +28,7 @@ var mysql = require('mysql');
 var wss = require('ws');
 var async = require('async');
 var path = require('path');
+var crypto = require('crypto');
 var sessionStore = new MySQLStore(mysqlOptions);
 var sessionMiddleware = session({
     key: 'session',
@@ -831,6 +832,35 @@ app.get('/getroles', function (req, res) {
     });
 });
 
+app.post('/api/alert', function(req, res) {
+    msg = {};
+    mission = req.body.mission;
+    msg.user_id = 0;
+    msg.analyst = '';
+    msg.channel = req.body.channel;
+    msg.text = xssFilters.inHTMLData(req.body.text);
+    msg.timestamp = (new Date).getTime();
+    connection.query('SELECT id, username FROM users WHERE api = ? LIMIT 1', [req.body.api], function(err, rows, fields) {
+        if (!err && rows.length > 0) {
+            msg.user_id = rows[0].id;
+            msg.analyst = rows[0].username;
+            connection.query('INSERT INTO log (mission, analyst, channel, text, timestamp) values (?, ?, ?, ?, ?)', [mission, msg.user_id, msg.channel, msg.text, msg.timestamp], function (err, results) {
+                if (!err) {
+                    sendToRoom(mission, JSON.stringify({act:'chat', arg:{messages:[msg]}}));
+                    res.end('OK');
+                } else {
+                    console.log(err);
+                    res.end('ERR');
+                }
+            });
+        } else {
+            console.log(err);
+            res.end('ERR');
+        }
+    });
+    
+});
+
 app.post('/api/:table', function (req, res) {
     if (!req.session.loggedin) {
         res.end('ERR');
@@ -945,7 +975,8 @@ app.post('/api/:table', function (req, res) {
                     req.body.role = null;
                 if (req.body.permissions === undefined || req.body.permissions === '')
                     req.body.permissions = null;
-                connection.query('INSERT INTO users (username, name, password, permissions) values (?, ?, ?, ?)', [req.body.username, req.body.name, hash, req.body.permissions], function (err, results) {
+                var api = crypto.randomBytes(32).toString('hex'); 
+                connection.query('INSERT INTO users (username, name, password, permissions, api) values (?, ?, ?, ?, ?)', [req.body.username, req.body.name, hash, req.body.permissions, api], function (err, results) {
                     if (!err) {
                         res.end(JSON.stringify('OK'));
                     } else {
