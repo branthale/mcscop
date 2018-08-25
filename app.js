@@ -1146,7 +1146,7 @@ app.get('/cop', function (req, res) {
                                     req.session.mission_role[req.query.mission] = mission_role;
                                     req.session.mission_permissions[req.query.mission] = mission_permissions;
                                     if (req.session.user_id === 1 || (mission_permissions && mission_permissions !== '')) // always let admin in
-                                        res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
+                                        res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, username: req.session.username, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
                                     else
                                         res.redirect('login');
                                 });

@@ -110,6 +110,7 @@ if (permissions.indexOf('all') !== -1 || permissions.indexOf('modify_notes') !==
 }
 
 // toastr
+var notifSound = null;
 toastr.options = {
   "closeButton": true,
   "debug": false,
@@ -855,6 +856,29 @@ Number.prototype.round = function(places) {
 }
 
 // ---------------------------- CHAT / LOG WINDOW  ----------------------------------
+function notification(msg) {
+    notifSound.play();
+    if (!("Notification" in window) || Notification.permission === 'denied') {
+        toastr.info(msg.text, msg.analyst)
+    }
+    else if (Notification.permission === 'granted') {
+        var notification = new Notification(msg.analyst, {
+            icon: 'images/avatars/' + msg.user_id + '.png',
+            body: msg.text
+        });
+    }
+    else {
+        Notification.requestPermission(function (permission) {
+            if (!('permission' in Notification)) {
+                Notification.permission = permission;
+            }
+            if (permission === 'granted') {
+                var notification = new Notification(msg);
+            }
+        });
+    }
+}
+
 function addChatMessage(msg, bulk) {
     if (!bulk)
         bulk = false;
@@ -871,17 +895,26 @@ function addChatMessage(msg, bulk) {
         else {
             var atBottom = $('#' + msg.messages[i].channel)[0].scrollHeight - Math.round($('#' + msg.messages[i].channel).scrollTop()) == $('#' + msg.messages[i].channel).outerHeight();
             var newMsg = $('<div class="message-wrapper"><div class="message"><div class="message-gutter"><img class="message-avatar" src="images/avatars/' + msg.messages[i].user_id + '.png"/></div><div class="message-content"><div class="message-content-header"><span class="message-sender">' + msg.messages[i].analyst + '</span><span class="message-time">' + epochToDateString(ts) + '</span></div><span class="message-body">' + msg.messages[i].text + '</span></div></div>');
-            if (!bulk && activeChannel ===  msg.messages[i].channel)
+            if (!bulk && activeChannel === msg.messages[i].channel)
                 newMsg.hide();
             newMsg.appendTo(pane);
-            if (!bulk && msg.messages[i].channel !== 'log' && user_id != msg.messages[i].user_id)
-                toastr.info(msg.messages[i].text, msg.messages[i].analyst)
-            if (!bulk && activeChannel !== msg.messages[i].channel) {
-                if (!unreadMessages[msg.messages[i].channel])
+            if (!bulk && msg.messages[i].channel !== 'log' && user_id != msg.messages[i].user_id) {
+                if (msg.messages[i].text.search('@' + username) >= 0 || msg.messages[i].text.search('@alert') >= 0) {
+                    notification(msg.messages[i]);
+                }
+            }
+            if (!bulk && msg.messages[i].channel !== 'log' && (activeTable !== 'chat' || activeChannel !== msg.messages[i].channel)) {
+                if (!unreadMessages[msg.messages[i].channel]) {
+                    $('.newMessage').removeClass('newMessage');
+                    $('.newMessageLabel').remove();
                     unreadMessages[msg.messages[i].channel] = 1;
+                    newMsg.addClass('newMessage');
+                    newMsg.append('<div class="newMessageLabel">New Messages</div>');
+                }
                 else
                     unreadMessages[msg.messages[i].channel]++;
                 $('#unread-' + msg.messages[i].channel).text(unreadMessages[msg.messages[i].channel]).show();
+                $('#chatTab').css('background-color', '#ff6060');
             }
             if (!bulk && activeChannel === msg.messages[i].channel)
                 newMsg.fadeIn('fast');
@@ -2094,8 +2127,8 @@ function saveRow(type, table, id, prefix) {
 }
 
 $(document).ready(function() {
-
     startTime();
+    notifSound = new Audio('sounds/knock.mp3');
     $('.modal-dialog').draggable({ handle: '.modal-header' });
     $('.modal-content').resizable({ minHeight: 153, minWidth: 300});
     // ---------------------------- SOCKETS ----------------------------------
@@ -3120,10 +3153,16 @@ $(document).ready(function() {
         $('#' + c).show();
         unreadMessages[c] = 0;
         $('#unread-' + c).hide();
+        $('#chatTab').css('background-color', '');
         if (!chatPosition[c] || chatPosition[c] === 'bottom')
             $('#' + c).scrollTop($('#' + c)[0].scrollHeight);
         $('#channel-' + c).addClass('channel-selected');
         activeChannel = c;
+    });
+    $('#chatTab').click(function(e) {
+        unreadMessages[activeChannel] = 0;
+        $('#unread-' + activeChannel).hide();
+        $('#chatTab').css('background-color', '');
     });
     // ---------------------------- WINDOW MANAGER ----------------------------------
     windowManager = new bsw.WindowManager({
