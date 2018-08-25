@@ -406,6 +406,26 @@ ws.on('connection', function(socket) {
                         }
                     }
                     break;
+                case 'rename_note':
+                    if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
+                        var evt = msg.arg;
+                        if (evt.name) {
+                            evt.name = xssFilters.inHTMLData(evt.name);
+                            evt.analyst = socket.user_id;
+                            connection.query('UPDATE notes SET name = ? WHERE id = ?', [evt.name, evt.id], function (err, results) {
+                                if (!err) {
+                                    insertLogEvent(socket, 'Renamed note: ' + evt.name + '.');
+                                    sendToRoom(socket.room, JSON.stringify({act: 'rename_note', arg: {
+                                        id: evt.id,
+                                        name: evt.name
+                                    }}));
+                                } else
+                                    console.log(err);
+                            });
+                        }
+                    }
+                    break;
+
                 case 'delete_note':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
                         var evt = msg.arg;

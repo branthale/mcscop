@@ -969,7 +969,7 @@ function createNotesTree(arg) {
                 'select_node' : false,
                 'items': function(node) {
                     return {
-                        'mkdir': {
+                        'newnote': {
                             'separator_before': false,
                             'separator_after': false,
                             'label': 'New Note',
@@ -977,6 +977,17 @@ function createNotesTree(arg) {
                                 var _node = node;
                                 bootbox.prompt('Note name?', function(name) {
                                     diagram.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
+                                });
+                            }
+                        },
+                        'renamenote': {
+                            'separator_before': false,
+                            'separator_after': false,
+                            'label': 'Rename',
+                            'action': function (obj) {
+                                var _node = node;
+                                bootbox.prompt('Rename note to?', function(name) {
+                                    diagram.send(JSON.stringify({act: 'rename_note', arg: {id: node.id, name: name}, msgId: msgHandler()}));
                                 });
                             }
                         },
@@ -2265,6 +2276,11 @@ $(document).ready(function() {
                 break;
             case 'insert_note':
                 $('#notes').jstree(true).create_node('#', msg.arg);
+                break;
+            case 'rename_note':
+                var node = $('#notes').jstree(true).get_node(msg.arg.id, true);
+                if (node)
+                    $('#notes').jstree(true).rename_node(node, msg.arg.name);
                 break;
             case 'delete_note':
                 var node = $('#notes').jstree(true).get_node(msg.arg.id, true);
