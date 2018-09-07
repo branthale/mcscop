@@ -91,7 +91,7 @@ handleMySqlConnection();
 
 var db = require('sharedb-mongo')('mongodb://localhost:27017/mcscop');
 ShareDB.types.register(richText.type);
-var backend = new ShareDB({db: db});
+var backend = new ShareDB({db: db, disableDocAction: true, disableSpaceDelimitedActions: true});
 
 function sendToRoom(room, msg, selfSocket, roleFilter) {
     if (!selfSocket)
@@ -200,11 +200,11 @@ function insertLogEvent(socket, message, channel) {
     sendToRoom(socket.room, JSON.stringify({act:'chat', arg:{messages:[{analyst: socket.username, user_id: socket.user_id, channel: channel, text: message, timestamp: timestamp}]}}));
 }
 
-ws.on('connection', function(socket) {
+ws.on('connection', function(socket, req) {
     socket.loggedin = false;
     socket.session = '';
     socket.mission = 0;
-    session = socket.upgradeReq.headers.cookie.split('session=s%3A')[1].split('.')[0];
+    session = req.headers.cookie.split('session=s%3A')[1].split('.')[0];
     if (session) {
         socket.session = session;
         connection.query('SELECT data FROM sessions WHERE session_id = ? LIMIT 1', [session], function(err, rows, fields) {
