@@ -1,14 +1,8 @@
 // cop fqdn.  Don't include http, https, etc.
 var url = 'www.ironrain.org'
+
 // enable content security policy (this requires url to be set!)
 var cspEnabled = false;
-// mysql settings
-var mysqlOptions = {
-    host : 'localhost',
-    user : 'mcscop',
-    password : 'MCScoppass123!@#',
-    database: 'mcscop',
-};
 
 var express = require('express');
 var fs = require('fs');
@@ -19,29 +13,60 @@ var richText = require('rich-text');
 var WebSocketJSONStream = require('websocket-json-stream');
 var http = require('http').Server(app);
 var session = require('express-session');
-var MySQLStore = require('express-mysql-session')(session);
 var xssFilters = require('xss-filters');
 var cookieParser = require('cookie-parser');
 var bcrypt = require('bcrypt-nodejs');
 var bodyParser = require('body-parser');
-var mysql = require('mysql');
 var wss = require('ws');
 var async = require('async');
 var path = require('path');
 var crypto = require('crypto');
-var sessionStore = new MySQLStore(mysqlOptions);
-var sessionMiddleware = session({
-    key: 'session',
-    secret: 'ProtectxorTheCybxors',
-    name: 'session',
-    resave: true,
-    saveUninitialized: true,
-    store: sessionStore
-});
+var MongoClient = require('mongodb').MongoClient;
+var MongoStore = require('connect-mongo')(session);
+var ObjectID = require('mongodb').ObjectID;
 var rooms = new Map();
 var connection;
 var ws = new wss.Server({server:http});
 var upload = multer({dest: './temp_uploads'});
+
+var cop_permissions = ['all', 'manage_missions', 'delete_missions', 'manage_users', 'manage_roles'];
+var mission_permissions = ['all', 'manage_users', 'modify_diagram', 'create_events', 'delete_events', 'modify_notes', 'create_opnotes', 'delete_opnotes', 'modify_files'];
+
+app.set('view engine', 'pug');
+app.use(express.static('public'));
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(session({
+    secret: 'ProtextTheCybxers',
+    name: 'session',
+    saveUninitialized: true,
+    resave: true,
+    store: new MongoStore({
+        url: 'mongodb://localhost/mcscop',
+        host: 'localhost',
+        collection: 'sessions',
+        autoReconnect: true,
+        clear_interval: 3600
+    })
+}));
+
+if (cspEnabled) {
+    app.use(function(req, res, next) {
+        res.setHeader("Content-Security-Policy", "connect-src 'self' wss://" + url + " ws://" + url + "; worker-src 'self' https://" + url + " blob:; default-src 'unsafe-inline' 'unsafe-eval' 'self'; img-src 'self' data: blob:;");
+        return next();
+    });
+}
+
+var mdb;
+
+MongoClient.connect('mongodb://localhost/mcscop', function(err, database) {
+    if (err) throw err;
+    mdb = database;
+});
+
+var db = require('sharedb-mongo')('mongodb://localhost:27017/mcscop');
+ShareDB.types.register(richText.type);
+var backend = new ShareDB({db: db, disableDocAction: true, disableSpaceDelimitedActions: true});
 
 Array.prototype.move = function (old_index, new_index) {
     if (new_index >= this.length) {
@@ -53,45 +78,6 @@ Array.prototype.move = function (old_index, new_index) {
     this.splice(new_index, 0, this.splice(old_index, 1)[0]);
     return this;
 };
-
-var cop_permissions = ['all', 'manage_missions', 'delete_missions', 'manage_users', 'manage_roles'];
-var mission_permissions = ['all', 'manage_users', 'modify_diagram', 'create_events', 'delete_events', 'modify_notes', 'create_opnotes', 'delete_opnotes', 'modify_files'];
-
-app.set('view engine', 'pug');
-app.use(express.static('public'));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(sessionMiddleware);
-if (cspEnabled) {
-    app.use(function(req, res, next) {
-        res.setHeader("Content-Security-Policy", "connect-src 'self' wss://" + url + " ws://" + url + "; worker-src 'self' https://" + url + " blob:; default-src 'unsafe-inline' 'unsafe-eval' 'self'; img-src 'self' data: blob:;");
-        return next();
-    });
-}
-
-function handleMySqlConnection() {
-    connection = mysql.createConnection(mysqlOptions);
-    connection.connect(function(err) {
-        if(err) {
-            console.log('Error connecting to MySql server:', err);
-            setTimeout(handleMySqlConnection, 5000);
-        }
-    });
-    connection.on('error', function(err) {
-        console.log('MySql error:', err);
-        if(err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'PROTOCOL_PACKETS_OUT_OF_ORDER') {
-            handleMySqlConnection();
-        } else {
-            throw err;
-        }
-    });
-}
-
-handleMySqlConnection();
-
-var db = require('sharedb-mongo')('mongodb://localhost:27017/mcscop');
-ShareDB.types.register(richText.type);
-var backend = new ShareDB({db: db, disableDocAction: true, disableSpaceDelimitedActions: true});
 
 function sendToRoom(room, msg, selfSocket, roleFilter) {
     if (!selfSocket)
@@ -194,10 +180,15 @@ function processNode(dir, mission, f) {
 function insertLogEvent(socket, message, channel) {
     if (!channel || channel === '')
         channel = 'log';
-    var analyst = socket.user_id;
     var timestamp = (new Date).getTime();
-    connection.query('INSERT INTO log (mission, channel, text, analyst, timestamp) values (?, ?, ?, ?, ?)', [socket.mission, channel, message, analyst, timestamp]);
-    sendToRoom(socket.room, JSON.stringify({act:'chat', arg:{messages:[{analyst: socket.username, user_id: socket.user_id, channel: channel, text: message, timestamp: timestamp}]}}));
+    var log = { mission_id: ObjectID(socket.mission), user_id: ObjectID(socket.user_id), channel: channel, text: message, timestamp: timestamp, deleted: false };
+    mdb.collection('chats').insertOne(log, function (err, result) {
+        if (!err) {
+            log.username = socket.username;
+            sendToRoom(socket.room, JSON.stringify({ act: 'chat', arg: { messages: [ log ] } }));
+        } else
+            console.log(err);
+    });
 }
 
 ws.on('connection', function(socket, req) {
@@ -207,10 +198,10 @@ ws.on('connection', function(socket, req) {
     session = req.headers.cookie.split('session=s%3A')[1].split('.')[0];
     if (session) {
         socket.session = session;
-        connection.query('SELECT data FROM sessions WHERE session_id = ? LIMIT 1', [session], function(err, rows, fields) {
+        mdb.collection('sessions').findOne({ _id: session }, function(err, row) {
             if (!err) {
                 try {
-                    data = JSON.parse(rows[0].data);
+                    var data = JSON.parse(row.session);
                     socket.loggedin = data.loggedin;
                     socket.user_id = data.user_id;
                     socket.username = data.username;
@@ -220,6 +211,7 @@ ws.on('connection', function(socket, req) {
                     socket.mission_role = data.mission_role;
                     socket.sub_roles = data.sub_roles;
                 } catch (e) {
+                    console.log(e);
                 }
             } else
                 console.log(err);
@@ -231,12 +223,14 @@ ws.on('connection', function(socket, req) {
         } catch (e) {
             return;
         }
-        if (socket.loggedin && msg.act) {
+        
+        if (msg.act && ((msg.act === 'stream' || msg.act === 'join') || (socket.mission && ObjectID.isValid(socket.mission) && socket.user_id && ObjectID.isValid(socket.user_id))) && socket.loggedin) {
             switch (msg.act) {
                 case 'stream':
                     var stream = new WebSocketJSONStream(socket);
                     backend.listen(stream);
                     break;
+
                 case 'join':
                     socket.room = msg.arg.mission;
                     socket.mission = msg.arg.mission;
@@ -244,119 +238,264 @@ ws.on('connection', function(socket, req) {
                         rooms.set(msg.arg.mission, new Set());
                     rooms.get(msg.arg.mission).add(socket);
                     break;
+
                 // ------------------------- CHATS -------------------------
                 case 'insert_chat':
-                    msg.arg.analyst = socket.username;
+                    msg.arg.username = socket.username;
                     msg.arg.user_id = socket.user_id;
                     msg.arg.text = xssFilters.inHTMLData(msg.arg.text);
                     msg.arg.timestamp = (new Date).getTime();
-                    connection.query('INSERT INTO log (mission, analyst, channel, text, timestamp) values (?, ?, ?, ?, ?)', [socket.mission, socket.user_id, msg.arg.channel, msg.arg.text, msg.arg.timestamp], function (err, results) {
+
+                    var chat = { mission_id: ObjectID(socket.mission), user_id: ObjectID(socket.user_id), channel: msg.arg.channel, text: msg.arg.text, timestamp: msg.arg.timestamp, deleted: false };
+                    mdb.collection('chats').insertOne(chat, function (err, result) {
                         if (!err) {
                             sendToRoom(socket.room, JSON.stringify({act:'chat', arg:{messages:[msg.arg]}}));
                         } else
                             console.log(err);
                     });
+        
                     break;
+
                 case 'get_old_chats':
-                    if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from)) {
-                        connection.query('SELECT * FROM (SELECT true AS prepend, analyst AS user_id, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) AS analyst, channel, text, timestamp FROM log WHERE deleted = 0 AND mission = ? AND channel = ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 50) tmp ORDER BY timestamp DESC', [socket.mission, msg.arg.channel, parseInt(msg.arg.start_from)], function(err, rows, fields) {
-                            if (rows && rows.length == 50) {
+                    if (!msg.arg.start_from || isNaN(msg.arg.start_from) || !msg.arg.channel)
+                        break;
+
+                    mdb.collection('chats').aggregate([
+                        {
+                            $match: { mission_id: ObjectID(socket.mission), channel: msg.arg.channel, timestamp: { $lt: parseInt(msg.arg.start_from) }, deleted: { $ne: true } }
+                        },{
+                            $sort: { timestamp: -1 }
+                        },{
+                            $limit: 50
+                        },{
+                            $lookup: {
+                                from: 'users',
+                                localField: 'user_id',
+                                foreignField: '_id',
+                                as: 'username'
+                            }
+                        },{
+                            $project: {
+                                _id: 1,
+                                user_id: 1,
+                                channel: 1,
+                                text: 1,
+                                timestamp: 1,
+                                prepend: 'true',
+                                username: '$username.username'
+                            }
+                    }]).toArray(function(err, rows) {
+                        
+                        if (!err) {
+                            if (rows.length == 50)
                                 if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from))
                                     rows[49].more = 1;
                                 else
                                     rows[0].more = 1;
+                            socket.send(JSON.stringify({act:'bulk_chat', arg:{messages:rows}}));
+                        } else {
+                            socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
+                            console.log(err);
+                        }
+                    });
+                    break;
+
+                case 'get_all_chats':
+                    var res = [];
+                    mdb.collection('chats').distinct('channel', function(err, channels) {
+                        if (!err) {
+                            async.each(channels, function(channel, callback) {
+                                mdb.collection('chats').aggregate([
+                                    {
+                                        $match: { mission_id: ObjectID(socket.mission), channel: channel, deleted: { $ne: true } }
+                                    },{
+                                        $sort: { timestamp: -1 }
+                                    },{
+                                        $limit: 50
+                                    },{
+                                        $sort: { timestamp: 1 }
+                                    },{
+                                        $lookup: {
+                                            from: 'users',
+                                            localField: 'user_id',
+                                            foreignField: '_id',
+                                            as: 'username'
+                                        }
+                                    },{
+                                        $project: {
+                                            _id: 1,
+                                            user_id: 1,
+                                            channel: 1,
+                                            text: 1,
+                                            timestamp: 1,
+                                            username: '$username.username'
+                                        }
+                                }]).toArray(function(err, rows) {
+                                    if (!err) {
+                                        if (rows.length == 50)
+                                            if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from))
+                                                rows[49].more = 1;
+                                            else
+                                                rows[0].more = 1;
+                                        res = res.concat(rows);
+                                        callback();
+                                    } else {
+                                        socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
+                                        console.log(err);
+                                    }
+                                });
+                            }, function(err) {
+                                if (!err)
+                                    socket.send(JSON.stringify({ act:'bulk_chat', arg:{ messages:res } }));
+                            });
+                        } else
+                            console.log(err);
+                    });
+                    break;
+
+                // ------------------------- ROLES -------------------------
+                case 'get_roles':
+                    mdb.collection('roles').find({ deleted: { $ne: true }}).toArray(function(err, rows) {
+                        if (!err) {
+                            socket.send(JSON.stringify({ act: 'all_roles', arg: rows }))
+                        } else {
+                            socket.send(JSON.stringify({ act: 'all_roles', arg: '[]' }));
+                            console.log(err);
+                        }
+                    });
+                    break;
+
+                // ------------------------- USERS -------------------------
+                case 'get_users':
+                    mdb.collection('users').find({ deleted: { $ne: true } }, { username: 1 }).toArray(function(err, rows) {
+                        if (!err) {
+                            socket.send(JSON.stringify({ act: 'all_users', arg: rows }))
+                        } else {
+                            socket.send(JSON.stringify({ act: 'all_users', arg: '[]' }));
+                            console.log(err);
+                        }
+                    });
+                    break;
+
+                case 'get_user_settings':
+                    mdb.collection('missions').aggregate([
+                        {
+                            $match: { _id: ObjectID(socket.mission), deleted: { $ne: true } }
+                        },{
+                            $unwind: '$mission_users'
+                        },{
+                            $lookup: {
+                                from: 'users',
+                                localField: 'mission_users.user_id',
+                                foreignField: '_id',
+                                as: 'user'
                             }
+                        },{
+                            $project: {
+                                _id: '$mission_users._id',
+                                user_id: '$mission_users.user_id',
+                                username: '$user.username',
+                                permissions: '$mission_users.permissions',
+                                role: '$mission_users.role'
+                            }
+                        }
+                    ]).toArray(function(err, rows) {
+                        if (!err) {
+                            socket.send(JSON.stringify({ act: 'all_user_settings', arg: rows }));
+                        } else {
+                            socket.send(JSON.stringify({ act: 'all_user_settings', arg: '[]' }));
+                            console.log(err);
+                        }
+                    });
+                    break;
+                case 'insert_user_setting':
+                    if (hasPermission(socket.mission_permissions[socket.mission], 'manage_users')) {
+                        var user = msg.arg;
+
+                        if (!user.user_id)
+                            break;
+
+                        user.permissions = xssFilters.inHTMLData(user.permissions);
+                        user.username = xssFilters.inHTMLData(user.username);
+                        user.role = xssFilters.inHTMLData(user.role);
+
+                        if (user.permissions === '')
+                            user.permissions = null
+
+                        var new_values = { $push: { mission_users: { _id: ObjectID(null), user_id: ObjectID(user.user_id), permissions: user.permissions, role: null } } };
+                        
+                        if (user.role && ObjectID.isValid(user.role))
+                            new_values.$push.mission_users.role = ObjectID(user.role);
+
+                        mdb.collection('missions').count({ _id: ObjectID(socket.mission), 'mission_users.user_id': ObjectID(user.user_id) }, function(err, count) {
+                            // don't let the user make the same user setting over again
+                            if (count === 0) {
+                                mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission) }, new_values, function (err, result) {
+                                    if (!err) {
+                                        socket.send(JSON.stringify({act: 'insert_user_setting', arg: user}));
+                                        insertLogEvent(socket, 'Inserted user setting ID: ' + user.user_id + '.');
+                                    } else
+                                        console.log(err);
+                                });
+                            }
+                        });
+                    }
+                    break;
+
+                case 'update_user_setting':
+                    if (hasPermission(socket.mission_permissions[socket.mission], 'manage_users')) {
+                        var user = msg.arg;
+
+                        if (!ObjectID.isValid(user.user_id))
+                            break;
+
+                        user.permissions = xssFilters.inHTMLData(user.permissions);
+                        user.username = xssFilters.inHTMLData(user.username);
+
+                        if (user.permissions === '')
+                            user.permissions = null
+
+                        var new_values = { $set: { 'mission_users.$.permissions': user.permissions, 'mission_users.$.role': null }  };
+
+                        if (user.role && ObjectID.isValid(user.role))
+                            new_values.$set['mission_users.$.role'] = ObjectID(user.role);
+
+                        mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission), 'mission_users.user_id': ObjectID(user.user_id) }, new_values, function (err, result) {
                             if (!err) {
-                                socket.send(JSON.stringify({act:'bulk_chat', arg:{messages:rows}}));
+                                socket.send(JSON.stringify({act: 'update_user_setting', arg: user}));
+                                insertLogEvent(socket, 'Modified user setting ID: ' + user.user_id + '.');
                             } else
                                 console.log(err);
                         });
                     }
                     break;
-                case 'get_all_chats':
-                    var res = [];
-                    connection.query('SELECT DISTINCT(channel) FROM log WHERE deleted = 0 AND mission = ?', [socket.mission], function(err, channels, fields) {
-                        if (!err) {
-                            async.each(channels, function(channel, callback) {
-                                connection.query('SELECT * FROM (SELECT analyst as user_id, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) AS analyst, channel, text, timestamp FROM log WHERE deleted = 0 AND mission = ? AND channel = ? ORDER BY timestamp DESC LIMIT 50) tmp ORDER BY timestamp ASC', [socket.mission, channel.channel], function(err, rows, fields) {
-                                    if (rows && rows.length == 50) {
-                                        if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from))
-                                            rows[49].more = 1;
-                                        else
-                                            rows[0].more = 1;
-                                    }
-                                    if (!err) {
-                                        res = res.concat(rows);
-                                        callback();
-                                    } else
-                                        console.log(err);
-                                });
-                            }, function(err) {
-                                if (!err)
-                                    socket.send(JSON.stringify({act:'bulk_chat', arg:{messages:res}}));
-                            });
-                        }
-                    });
-                    break;
-                // ------------------------- ROLES -------------------------
-                case 'get_roles':
-                    connection.query('SELECT id, name FROM roles', [], function(err, rows, fields) {
-                        if (!err) {
-                            socket.send(JSON.stringify({act:'all_roles', arg:rows}));
-                        } else
-                            console.log(err);
-                    });
-                    break;
-                // ------------------------- USERS -------------------------
-                case 'get_users':
-                    connection.query('SELECT id, username, (SELECT role FROM mission_users_rel WHERE user_id = users.id AND mission = ? LIMIT 1) AS role, (SELECT permissions FROM mission_users_rel WHERE user_id = users.id AND mission = ? LIMIT 1) AS permissions FROM users WHERE deleted = 0', [socket.mission, socket.mission], function(err, rows, fields) {
-                        if (!err) {
-                            socket.send(JSON.stringify({act:'all_users', arg:rows}));
-                        } else
-                            console.log(err);
-                    });
-                    break;
-                case 'update_user':
+
+                case 'delete_user_setting':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'manage_users')) {
                         var user = msg.arg;
-                        if (user.id) {
-                            user.permissions = xssFilters.inHTMLData(user.permissions);
-                            user.username = xssFilters.inHTMLData(user.username);
-                            if (user.role === '')
-                                user.role = null;
-                            connection.query('SELECT id FROM mission_users_rel WHERE mission = ? AND user_id = ?', [socket.mission, user.id], function(err, rows, fields) {
-                                if (rows.length > 0) {
-                                    connection.query('UPDATE mission_users_rel SET role = ?, permissions = ? WHERE id = ?', [user.role, user.permissions, rows[0].id], function (err, results) {
-                                        if (!err) {
-                                            sendToRoom(socket.room, JSON.stringify({act: 'update_user', arg: user}), socket);
-                                            insertLogEvent(socket, 'Modified user ID: ' + user.id + '.');
-                                        } else
-                                            console.log(err);
-                                    });
-                                } else {
-                                    connection.query('INSERT INTO mission_users_rel (user_id, mission, role, permissions) VALUES (?, ?, ?, ?)', [user.id, socket.mission, user.role, user.permissions], function (err, results) {
-                                        if (!err) {
-                                            sendToRoom(socket.room, JSON.stringify({act: 'update_user', arg: user}), socket);
-                                            insertLogEvent(socket, 'Modified user ID: ' + user.id + '.');
-                                        } else
-                                            console.log(err);
-                                    });
-                                }
-                            });
-                        }
+
+                        if (!ObjectID.isValid(user._id))
+                            break;
+
+                        mdb.collection('missions').findOneAndUpdate({ _id: ObjectID(socket.mission) }, { $pull: { mission_users: { _id: ObjectID(user._id) } } }, function (err, result) {
+                            if (!err) {
+                                sendToRoom(socket.room, JSON.stringify({act: 'delete_user_setting', arg: user}));
+                                insertLogEvent(socket, 'Deleted user setting ID: ' + user._id + '.');
+                            } else
+                                console.log(err);
+                        });
                     }
                     break;
                 // ------------------------- NOTES -------------------------
                 case 'get_notes':
-                    var analyst = socket.user_id;
-                    var query = 'SELECT id, name FROM notes WHERE deleted = 0 AND mission = ? ORDER BY name ASC'
                     var args = [socket.mission];
-                    connection.query(query, args, function(err, rows, fields) {
+
+                    mdb.collection('notes').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: false } ] }).sort({ name : 1 }).toArray(function(err, rows) {
                         if (!err) {
                             var resp = new Array();
                             for (var i = 0; i < rows.length; i++) {
                                 resp.push({
-                                    "id": rows[i].id,
+                                    "id": rows[i]._id,
                                     "text": rows[i].name,
                                     "icon" : 'jstree-custom-file',
                                     "state": {
@@ -376,431 +515,547 @@ ws.on('connection', function(socket, req) {
                             console.log(err);
                     });
                     break;
+
                 case 'insert_note':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
-                        var evt = msg.arg;
-                        if (evt.name) {
-                            evt.name = xssFilters.inHTMLData(evt.name);
-                            evt.analyst = socket.user_id;
-                            connection.query('INSERT INTO notes (mission, name) values (?, ?)', [socket.mission, evt.name], function (err, results) {
-                                if (!err) {
-                                    insertLogEvent(socket, 'Created note: ' + evt.name + '.');
-                                    sendToRoom(socket.room, JSON.stringify({act: 'insert_note', arg: {
-                                        "id": results.insertId,
-                                        "text": evt.name,
-                                        "icon" : 'jstree-custom-file',
-                                        "state": {
-                                            "opened": false,
-                                            "disabled": false,
-                                            "selected": false
-                                        },
-                                        "li_attr": {
-                                            "base": '#',
-                                            "isLeaf": true
-                                        },
-                                        "children": false
-                                    }}));
-                                } else
-                                    console.log(err);
-                            });
-                        }
+                        var e = msg.arg;
+
+                        if (!e.name)
+                            break;
+
+                        e.name = xssFilters.inHTMLData(e.name);
+                        var note = { mission_id: ObjectID(socket.mission), name: e.name, deleted: false };
+                        mdb.collection('notes').insertOne(note, function (err, result) {
+                            if (!err) {
+                                insertLogEvent(socket, 'Created note: ' + e.name + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'insert_note', arg: {
+                                    "id": note._id,
+                                    "text": e.name,
+                                    "icon" : 'jstree-custom-file',
+                                    "state": {
+                                        "opened": false,
+                                        "disabled": false,
+                                        "selected": false
+                                    },
+                                    "li_attr": {
+                                        "base": '#',
+                                        "isLeaf": true
+                                    },
+                                    "children": false
+                                }}));
+                            } else
+                                console.log(err);
+                        });
                     }
                     break;
+
                 case 'rename_note':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
-                        var evt = msg.arg;
-                        if (evt.name) {
-                            evt.name = xssFilters.inHTMLData(evt.name);
-                            evt.analyst = socket.user_id;
-                            connection.query('UPDATE notes SET name = ? WHERE id = ?', [evt.name, evt.id], function (err, results) {
-                                if (!err) {
-                                    insertLogEvent(socket, 'Renamed note: ' + evt.name + '.');
-                                    sendToRoom(socket.room, JSON.stringify({act: 'rename_note', arg: {
-                                        id: evt.id,
-                                        name: evt.name
-                                    }}));
-                                } else
-                                    console.log(err);
-                            });
-                        }
+                        var e = msg.arg;
+
+                        if (!e.name || !ObjectID.isValid(e.id))
+                            break;
+
+                        e.name = xssFilters.inHTMLData(e.name);
+                        var new_values = { $set: { name: e.name } };
+                        mdb.collection('notes').updateOne({ _id: ObjectID(e.id) }, new_values, function (err, result) {
+                            if (!err) {
+                                insertLogEvent(socket, 'Renamed note: ' + e.name + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'rename_note', arg: {
+                                    id: e.id,
+                                    name: e.name
+                                }}));
+                            } else
+                                console.log(err);
+                        });
                     }
                     break;
 
                 case 'delete_note':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
-                        var evt = msg.arg;
-                        if (!evt.id || isNaN(evt.id) || evt.id === '')
-                            evt.id = 0;
-                        connection.query('UPDATE notes SET deleted = 1 WHERE id = ?', [evt.id], function (err, results) {
+                        var e = msg.arg;
+
+                        if (!e.id || !ObjectID.isValid(e.id))
+                            break;
+
+                        mdb.collection('notes').updateOne({ _id: ObjectID(e.id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
-                                insertLogEvent(socket, 'Deleted note: ' + evt.id + '.');
-                                    sendToRoom(socket.room, JSON.stringify({act: 'delete_note', arg: evt}));
+                                insertLogEvent(socket, 'Deleted note: ' + e.id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'delete_note', arg: e}));
                             } else
                                 console.log(err);
                         });
                     }
                     break;
+
                 // ------------------------- EVENTS -------------------------
                 case 'get_events':
-                    connection.query('SELECT id, event_time, discovery_time, event_type, source_object, source_port, dest_object, dest_port, short_desc, (SELECT username FROM users WHERE users.id = analyst) as analyst, assignment FROM events WHERE deleted = 0 AND mission = ? ORDER BY event_time ASC', [socket.mission], function(err, rows, fields) {
+                    mdb.collection('events').aggregate([
+                        {
+                            $match: { mission_id: ObjectID(socket.mission), deleted: { $ne: true }}
+                        },{
+                            $sort: { event_time: 1 }
+                        },{
+                            $lookup: {
+                                from: 'users',
+                                localField: 'user_id',
+                                foreignField: '_id',
+                                as: 'username'
+                            }
+                        },{
+                            $project: {
+                                _id: 1,
+                                mission_id: 1,
+                                event_time: 1,
+                                discovery_time: 1,
+                                event_type: 1,
+                                source_object: 1,
+                                dest_object: 1,
+                                source_port: 1,
+                                dest_port: 1,
+                                short_desc: 1,
+                                assignment: 1,
+                                user_id: 1,
+                                username: '$username.username'
+                            }
+                        }
+                    ]).toArray(function(err, rows) {
                         if (!err) {
-                            socket.send(JSON.stringify({act:'all_events', arg:rows}));
+                            socket.send(JSON.stringify({ act:'all_events', arg:rows }))
                         } else
                             console.log(err);
                     });
                     break;
+
                 case 'update_event':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'modify_events')) {
-                        var evt = msg.arg;
-                        if (!evt.event_time || isNaN(evt.event_time) || evt.event_time === '')
-                            evt.event_time = (new Date).getTime();
-                        if (!evt.discovery_time || isNaN(evt.discovery_time) || evt.discovery_time === '')
-                            evt.discovery_time = (new Date).getTime();
-                        if (!evt.dest_port || isNaN(evt.dest_port) || evt.dest_port === '')
-                            evt.dest_port = 0;
-                        if (!evt.source_port || isNaN(evt.source_port) || evt.source_port === '')
-                            evt.source_port = 0;
-                        if (!evt.assignment || isNaN(evt.assignment) || evt.assignment === '')
-                            evt.assignment = 0;
-                        evt.event_type = xssFilters.inHTMLData(evt.event_type);
-                        evt.short_desc = xssFilters.inHTMLData(evt.short_desc);
-                        connection.query('UPDATE events SET event_time = ?, discovery_time = ?, source_object = ?, source_port = ?, dest_object = ?, dest_port = ?, event_type = ?, short_desc = ?, assignment = ? WHERE id = ?', [evt.event_time, evt.discovery_time, evt.source_object, evt.source_port, evt.dest_object, evt.dest_port, evt.event_type, evt.short_desc, evt.assignment, evt.id], function (err, results) {
+                        var e = msg.arg;
+
+                        if (!e._id || !ObjectID.isValid(e._id))
+                            break;
+
+                        if (!e.event_time || isNaN(e.event_time) || e.event_time === '')
+                            e.event_time = (new Date).getTime();
+                        if (!e.discovery_time || isNaN(e.discovery_time) || e.discovery_time === '')
+                            e.discovery_time = (new Date).getTime();
+                        if (!e.dest_port || isNaN(e.dest_port) || e.dest_port === '')
+                            e.dest_port = 0;
+                        if (!e.source_port || isNaN(e.source_port) || e.source_port === '')
+                            e.source_port = 0;
+
+                        e.event_type = xssFilters.inHTMLData(e.event_type);
+                        e.short_desc = xssFilters.inHTMLData(e.short_desc);
+
+                        var new_values = { $set: { event_time: e.event_time, discovery_time: e.discovery_time, source_object: null, source_port: e.source_port, dest_object: null, dest_port: e.dest_port, event_type: e.event_type, short_desc: e.short_desc, assignment: null} };
+
+                        if (e.source_object && ObjectID.isValid(e.source_object))
+                            new_values.$set.source_object = ObjectID(e.source_object);
+                        if (e.dest_object && ObjectID.isValid(e.dest_object))
+                            new_values.$set.dest_object = ObjectID(e.dest_object);
+                        if (e.assignment && ObjectID.isValid(e.assignment))
+                            new_values.$set.assignment = ObjectID(e.assignment);
+    
+                        mdb.collection('events').updateOne({ _id: ObjectID(e._id) }, new_values, function (err, result) {
                             if (!err) {
-                                insertLogEvent(socket, 'Modified event: ' + evt.event_type + ' ID: ' + evt.id + '.');
-                                sendToRoom(socket.room, JSON.stringify({act: 'update_event', arg: evt}), socket);
+                                insertLogEvent(socket, 'Modified event: ' + e.event_type + ' ID: ' + e._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'update_event', arg: e}), socket);
                             } else
                                 console.log(err);
                         });
                     }
                     break;
+
                 case 'insert_event':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'create_events')) {
-                        var evt = msg.arg;
-                        if (!evt.event_time || isNaN(evt.event_time) || evt.event_time === '')
-                            evt.event_time = (new Date).getTime();
-                        if (!evt.discovery_time || isNaN(evt.discovery_time) || evt.discovery_time === '')
-                            evt.discovery_time = (new Date).getTime();
-                        if (!evt.dest_port || isNaN(evt.dest_port) || evt.dest_port === '')
-                            evt.dest_port = 0;
-                        if (!evt.source_port || isNaN(evt.source_port) || evt.source_port === '')
-                            evt.source_port = 0;
-                        if (!evt.assignment || isNaN(evt.assignment) || evt.assignment === '')
-                            evt.assignment = 0;
-                        evt.event_type = xssFilters.inHTMLData(evt.event_type);
-                        evt.short_desc = xssFilters.inHTMLData(evt.short_desc);
-                        evt.analyst = socket.user_id;
-                        connection.query('INSERT INTO events (mission, event_time, discovery_time, source_object, source_port, dest_object, dest_port, event_type, short_desc, analyst, assignment) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [socket.mission, evt.event_time, evt.discovery_time, evt.source_object, evt.source_port, evt.dest_object, evt.dest_port, evt.event_type, evt.short_desc, evt.analyst, evt.assignment], function (err, results) {
+                        var e = msg.arg;
+                        if (!e.event_time || isNaN(e.event_time) || e.event_time === '')
+                            e.event_time = (new Date).getTime();
+                        if (!e.discovery_time || isNaN(e.discovery_time) || e.discovery_time === '')
+                            e.discovery_time = (new Date).getTime();
+                        if (!e.dest_port || isNaN(e.dest_port) || e.dest_port === '')
+                            e.dest_port = 0;
+                        if (!e.source_port || isNaN(e.source_port) || e.source_port === '')
+                            e.source_port = 0;
+
+                        e.event_type = xssFilters.inHTMLData(e.event_type);
+                        e.short_desc = xssFilters.inHTMLData(e.short_desc);
+                        e.user_id = socket.user_id;
+                        e.username = socket.username;
+
+                        var evt = { mission_id: ObjectID(socket.mission), event_time: e.event_time, discovery_time: e.discovery_time, source_object: null, source_port: e.source_port, dest_object: null, dest_port: e.dest_port, event_type: e.event_type, short_desc: e.short_desc, user_id: ObjectID(socket.user_id), deleted: false };
+
+                        if (e.source_object && ObjectID.isValid(e.source_object))
+                            evt.source_object = ObjectID(e.source_object);
+                        if (e.dest_object && ObjectID.isValid(e.dest_object))
+                            evt.dest_object = ObjectID(e.dest_object);
+                        if (e.assignment && ObjectID.isValid(e.assignment))
+                            evt.assignment = ObjectID(e.assignment);
+
+                        mdb.collection('events').insertOne(evt, function (err, result) {
                             if (!err) {
-                                evt.id = results.insertId;
-                                evt.analyst = socket.username;
-                                insertLogEvent(socket, 'Created event: ' + evt.event_type + ' ID: ' + evt.id + '.');
-                                sendToRoom(socket.room, JSON.stringify({act: 'insert_event', arg: evt}));
+                                e._id = evt._id;
+                                insertLogEvent(socket, 'Created event: ' + e.event_type + ' ID: ' + e._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'insert_event', arg: e}));
                             } else
                                 console.log(err);
                         });
                     }
-                    break; 
+                    break;
+
                 case 'delete_event':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'delete_events')) {
-                        var evt = msg.arg;
-                        if (!evt.id || isNaN(evt.id) || evt.id === '')
-                            evt.id = 0;
-                        connection.query('UPDATE events SET deleted = 1 WHERE id = ?', [evt.id], function (err, results) {
+                        var e = msg.arg;
+                        if (!e._id || !ObjectID.isValid(e._id))
+                            break;
+
+                        mdb.collection('events').updateOne({ _id: ObjectID(e._id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
-                                insertLogEvent(socket, 'Deleted event ID: ' + evt.id + '.');
-                                sendToRoom(socket.room, JSON.stringify({act: 'delete_event', arg: msg.arg}), socket);
+                                insertLogEvent(socket, 'Deleted event ID: ' + e._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({ act: 'delete_event', arg: e }), socket);
                             } else
                                 console.log(err);
                         });
                     }
                     break;
+
                 // ------------------------- OPNOTES -------------------------
                 case 'get_opnotes':
-                    var analyst = socket.user_id;
-                    var query = 'SELECT id, event_time, event, source_object, tool, action, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) as analyst FROM opnotes WHERE deleted = 0 AND mission = ? AND (analyst = ? OR role IN (?)) ORDER BY event_time ASC'
-                    var args = [socket.mission, analyst, socket.sub_roles];
-                    if (socket.sub_roles.length === 0) {
-                        query = 'SELECT id, event_time, event, source_object, tool, action, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) as analyst FROM opnotes WHERE deleted = 0 AND mission = ? ORDER BY event_time ASC';
-                        args = [socket.mission, analyst];
-                    }
-                    connection.query(query, args, function(err, rows, fields) {
+                    mdb.collection('opnotes').aggregate([
+                        {
+                            $match: { mission_id: ObjectID(socket.mission), deleted: { $ne: true }}
+                        },{
+                            $sort: { event_time: 1 }
+                        },{
+                            $lookup: {
+                                from: 'users',
+                                localField: 'user_id',
+                                foreignField: '_id',
+                                as: 'username'
+                            },
+                        },{
+                            $project: {
+                                _id: 1,
+                                mission_id: 1,
+                                evt: 1,
+                                event_time: 1,
+                                source_object: 1,
+                                tool: 1,
+                                action: 1,
+                                user_id: 1,
+                                username: '$username.username'
+                            }
+                        }
+                    ]).toArray(function(err, rows) {
                         if (!err) {
-                            socket.send(JSON.stringify({act:'all_opnotes', arg:rows}));
+                            socket.send(JSON.stringify({ act:'all_opnotes', arg:rows }))
                         } else
                             console.log(err);
                     });
                     break;
+
                 case 'update_opnote':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'create_opnotes')) {
-                        var evt = msg.arg;
-                        if (!evt.event || isNaN(evt.event) || evt.event === '')
-                            evt.event = 0;
-                        if (!evt.event_time || isNaN(evt.event_time) || evt.event === '')
-                            evt.event_time = (new Date).getTime();
-                        evt.source_object = xssFilters.inHTMLData(evt.source_object);
-                        evt.tool = xssFilters.inHTMLData(evt.tool);
-                        evt.action = xssFilters.inHTMLData(evt.action);
-                        connection.query('UPDATE opnotes SET event_time = ?, event = ?, source_object = ?, tool = ?, action = ? WHERE id = ?', [evt.event_time, evt.event, evt.source_object, evt.tool, evt.action, evt.id], function (err, results) {
+                        var e = msg.arg;
+
+                        if (!e._id || !ObjectID.isValid(e._id))
+                            break;
+
+                        e.source_object = xssFilters.inHTMLData(e.source_object);
+                        e.tool = xssFilters.inHTMLData(e.tool);
+                        e.action = xssFilters.inHTMLData(e.action);
+
+                        var new_values = { $set: { event_time: e.event_time, event_id: null, source_object: e.source_object, tool: e.tool, action: e.action } };
+
+                        if (e.event_id && ObjectID.isValid(e.event_id))
+                            new_values.event_id = ObjectID(e.event_id);
+
+                        if (!e.event_time || isNaN(e.event_time) || e.event_time === '')
+                            new_values.event_time = (new Date).getTime();
+
+                        mdb.collection('opnotes').updateOne({ _id: ObjectID(e._id) }, new_values, function (err, result) {
                             if (!err) {
-                                evt.analyst = socket.username;
-                                insertLogEvent(socket, 'Modified opnote: ' + evt.action + ' ID: ' + evt.id + '.');
-                                sendToRoom(socket.room, JSON.stringify({act: 'update_opnote', arg: evt}), socket, socket.role);
+                                e.username = socket.username;
+                                insertLogEvent(socket, 'Modified opnote: ' + e.action + ' ID: ' + e._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'update_opnote', arg: e}), socket, socket.role);
                             } else
                                 console.log(err);
                         });
                     }
                     break;
+
                 case 'insert_opnote':
+                    console.log('here');
                     if (hasPermission(socket.mission_permissions[socket.mission], 'create_opnotes')) {
-                        var evt = msg.arg;
-                        evt.analyst = socket.user_id;
-                        if (!evt.event || isNaN(evt.event) || evt.event === '')
-                            evt.event = 0;
-                        if (!evt.event_time || isNaN(evt.event_time) || evt.event === '')
-                            evt.event_time = (new Date).getTime();
-                        evt.source_object = xssFilters.inHTMLData(evt.source_object);
-                        evt.tool = xssFilters.inHTMLData(evt.tool);
-                        evt.action = xssFilters.inHTMLData(evt.action);
-                        connection.query('INSERT INTO opnotes (mission, event, role, event_time, source_object, tool, action, analyst) values (?, ?, ?, ?, ?, ?, ?, ?)', [socket.mission, evt.event, socket.mission_role[socket.mission], evt.event_time, evt.source_object, evt.tool, evt.action, socket.user_id], function (err, results) {
+                        var e = msg.arg;
+
+                        e.user_id = socket.user_id;
+                        e.source_object = xssFilters.inHTMLData(e.source_object);
+                        e.tool = xssFilters.inHTMLData(e.tool);
+                        e.action = xssFilters.inHTMLData(e.action);
+
+                        var opnote = { mission_id: ObjectID(socket.mission), event_id: null, role: socket.mission_role[socket.mission], event_time: e.event_time, source_object: e.source_object, tool: e.tool, action: e.action, user_id: ObjectID(e.user_id), deleted: false };
+
+                        if (e.event_id && ObjectID.isValid(e.event_id))
+                            e.event_id = ObjectID(e.event_id);
+
+                        if (!e.event_time || isNaN(e.event_time) || e.event === '')
+                            e.event_time = (new Date).getTime();
+
+                        mdb.collection('opnotes').insertOne(opnote, function (err, result) {
                             if (!err) {
-                                evt.id = results.insertId; 
-                                evt.analyst = socket.username; 
-                                insertLogEvent(socket, 'Created opnote: ' + evt.action + ' ID: ' + evt.id + '.');
-                                sendToRoom(socket.room, JSON.stringify({act: 'insert_opnote', arg: evt}), null, socket.role);
+                                e.id = opnote._id;
+                                e.user_id = socket.user_id;
+                                e.username = socket.username;
+                                insertLogEvent(socket, 'Created opnote: ' + e.action + ' ID: ' + e._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'insert_opnote', arg: e}), null, socket.role);
                             } else
                                 console.log(err);
                         });
                     }
                     break;
+
                 case 'delete_opnote':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'delete_opnotes')) {
-                        var evt = msg.arg;
-                        if (!evt.id || isNaN(evt.id) || evt.id === '')
-                            evt.id = -1;
-                        connection.query('UPDATE opnotes SET deleted = 1 WHERE id = ?', [evt.id], function (err, results) {
+                        var e = msg.arg;
+                        if (!e._id || !ObjectID.isValid(e._id))
+                            break;
+
+                        mdb.collection('opnotes').updateOne({ _id: ObjectID(e._id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
-                                insertLogEvent(socket, 'Deleted opnote ID: ' + evt.id + '.');
-                                sendToRoom(socket.room, JSON.stringify({act: 'delete_opnote', arg: evt}), socket, socket.role);
+                                insertLogEvent(socket, 'Deleted opnote ID: ' + e._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'delete_opnote', arg: e}), socket, socket.role);
                             } else
                                 console.log(err);
                         });
                     }
                     break;
+
                 // ------------------------- OBJECTS -------------------------
                 case 'get_objects':
-                    connection.query('SELECT * FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function(err, rows, fields) {
+                    mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: false }).sort({ z: 1 }).toArray(function(err, rows) {
                         if (!err) {
-                            socket.send(JSON.stringify({act:'all_objects', arg:rows}));
-                        } else
+                            socket.send(JSON.stringify({ act:'all_objects', arg:rows }))
+                        } else {
+                            socket.send(JSON.stringify('[]'));
                             console.log(err);
+                        }
                     });
                     break;
+
+                case 'paste_object':
+                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
+                        var o = msg.arg;
+
+                        if (!o._id || !ObjectID.isValid(o._id))
+                            break;
+
+                        mdb.collection('objects').findOne({ _id: ObjectID(o._id), deleted: false}, function(err, row) {
+                            if  (!err) {
+                                row._id = ObjectID(null);
+                                row.z = o.z;
+
+                                if (isNaN(parseFloat(o.x)) || !isFinite(o.x) || isNaN(parseFloat(o.y)) || !isFinite(o.y)) {
+                                    row.x += 20;
+                                    row.y += 20;
+                                } else {
+                                    row.x = o.x;
+                                    row.y = o.y;
+                                }
+
+                                mdb.collection('objects').insertOne(row, function (err, result) {
+                                    if (!err) {
+                                        insertLogEvent(socket, 'Created ' + row.type + ': ' + row.name + '.');
+                                        sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: row }));
+                                    } else
+                                        console.log(err);
+                                });
+                            } else
+                                console.log(err);
+                        });
+                    }
+                    break;
+
                 case 'insert_object':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
                         var o = msg.arg;
+                        if (o.type === 'link' && (!o.obj_a || !o.obj_b || !ObjectID.isValid(o.obj_a) || !ObjectID.isValid(o.obj_b)))
+                            break;
+
                         if (!o.image || o.image === '') {
                             socket.send(JSON.stringify({act: 'error', arg: 'Error: Missing image!'}));
                             break;
                         }
-                        if (o.type === 'icon' || o.type === 'shape') {
-                            connection.query('SELECT count(*) AS z FROM objects WHERE deleted = 0 AND mission = ?', [socket.mission], function (err, results) {
-                                o.z = results[0].z;
-                                var x = 33;
-                                var y = 33;
-                                if (!isNaN(parseFloat(o.x)) && isFinite(o.x) && !isNaN(parseFloat(o.y)) && isFinite(o.y)) {
-                                    x = o.x;
-                                    y = o.y;
-                                }
-                                var scale_x = 1;
-                                var scale_y = 1;
-                                var rot = 0;
-                                if (o.type === 'shape') {
-                                    scale_x = 65;
-                                    scale_y = 65;
-                                }
-                                o.type = xssFilters.inHTMLData(o.type);
-                                o.name = xssFilters.inHTMLData(o.name);
-                                o.fill_color = xssFilters.inHTMLData(o.fill_color);
-                                o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
-                                o.image = xssFilters.inHTMLData(o.image);
-                                connection.query('INSERT INTO objects (mission, type, name, fill_color, stroke_color, image, scale_x, scale_y, rot, x, y, z, locked) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [socket.mission, o.type, o.name, o.fill_color, o.stroke_color, o.image, scale_x, scale_y, rot, x, y, o.z, o.locked], function (err, results) {
-                                    if (!err) {
-                                        o.id = results.insertId;
-                                        connection.query('SELECT * FROM objects WHERE deleted = 0 AND id = ?', [o.id], function(err, rows, fields) {
-                                            if (!err) {
-                                                insertLogEvent(socket, 'Created object: ' + o.name + '.');
-                                                sendToRoom(socket.room, JSON.stringify({act: 'insert_object', arg:rows[0]}));
-                                            } else
-                                                console.log(err);
-                                        });
-                                    } else
-                                        console.log(err);
-                                });
-                            });
-                        } else if (o.type === 'link') {
+
+                        if (o.type === 'icon' || o.type === 'shape' || o.type === 'link') {
+                            if (isNaN(parseFloat(o.x)) || !isFinite(o.x) || isNaN(parseFloat(o.y)) || !isFinite(o.y)) {
+                                o.x = 33;
+                                o.y = 33;
+                            }
+                            o.rot = 0;
+                            o.scale_x = 1;
+                            o.scale_y = 1;
+                            if (o.type === 'shape') {
+                                o.scale_x = 65;
+                                o.scale_y = 65;
+                            }
                             o.type = xssFilters.inHTMLData(o.type);
                             o.name = xssFilters.inHTMLData(o.name);
                             o.fill_color = xssFilters.inHTMLData(o.fill_color);
                             o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
                             o.image = xssFilters.inHTMLData(o.image);
-                            o.z = 0;
-                            connection.query('INSERT INTO objects ( mission, type, name, stroke_color, image, obj_a, obj_b, z, locked) values (?, ?, ?, ?, ?, ?, ?, ?, 1)', [socket.mission, o.type, o.name, o.stroke_color, o.image, o.obj_a, o.obj_b, 99], function (err, results) {
+
+                            // get object count for new z
+                            mdb.collection('objects').count({ mission_id: ObjectID(socket.mission) }, function(err, count) {
                                 if (!err) {
-                                    o.id = results.insertId;
-                                        // move new links to back
-                                        connection.query('SELECT id FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function (err, results) {
-                                            var zs = [];
-                                            for (var i = 0; i < results.length; i++)
-                                                zs.push(results[i].id);
-                                            if (o.z !== zs.indexOf(o.id)) {
-                                                zs.move(zs.indexOf(o.id), o.z);
-                                                async.forEachOf(zs, function(item, index, callback) {
-                                                    connection.query('UPDATE objects SET z = ? WHERE id = ?', [index, item], function (err, results) {
-                                                        if (err)
-                                                            console.log(err);
-                                                        callback();
+                                    var object;
+                                    if (o.type === 'icon' || o.type === 'shape')
+                                        object = { mission_id: ObjectID(socket.mission), type: o.type, name: o.name, fill_color: o.fill_color, stroke_color: o.stroke_color, image: o.image, scale_x: o.scale_x, scale_y: o.scale_y, rot: o.rot, x: o.x, y: o.y, z: count, locked: o.locked, deleted: false };
+                                    else if (o.type === 'link')
+                                        object = { mission_id: ObjectID(socket.mission), type: o.type, name: o.name, stroke_color: o.stroke_color, image: o.image, obj_a: ObjectID(o.obj_a), obj_b: ObjectID(o.obj_b), z: 0, locked:o.locked, deleted: false };
+                                    // add object to db
+                                    mdb.collection('objects').insertOne(object, function (err, result) {
+                                        if (!err) {
+                                            // if link, push to back
+                                            if (o.type === 'link') {
+                                                mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: false } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                                    var zs = rows.map(r => String(r._id));
+                                                    zs.move(zs.indexOf(String(object._id)), 0);
+                                                    async.forEachOf(zs, function(item, index, callback) {
+                                                        var new_values = { $set: { z: index }};
+                                                        mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                                            if (err)
+                                                                console.log(err);
+                                                            callback();
+                                                        });
+                                                    }, function(err) {
+                                                        insertLogEvent(socket, 'Created ' + o.type + ': ' + o.name + '.');
+                                                        sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: object }));
                                                     });
-                                                }, function(err) {
-                                                    insertLogEvent(socket, 'Created link: ' + o.name + '.');
-                                                    sendToRoom(socket.room, JSON.stringify({act: 'insert_object', arg:o}));
                                                 });
+                                            } else {
+                                                // push object back to room
+                                                insertLogEvent(socket, 'Created ' + o.type + ': ' + o.name + '.');
+                                                sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: object }));
                                             }
+                                        } else {
+                                            console.log(err);
+                                        }
                                     });
                                 } else {
                                     console.log(err);
-                                    socket.send(JSON.stringify({act: 'error', arg: 'Error: ' + err}));
                                 }
                             });
                         }
                     }
                     break;
+
                 case 'delete_object':
                     if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
                         var o = msg.arg;
-                        if (o.type && o.id) {
-                            if (o.type === 'icon' || o.type === 'shape') {
-                                connection.query('UPDATE objects SET deleted = 1 WHERE id = ?', [o.id], function (err, results) {
-                                    if (!err) {
-                                        sendToRoom(socket.room, JSON.stringify({act: 'delete_object', arg:o.id}));
-                                        connection.query('SELECT id FROM objects WHERE deleted = 0 AND (obj_a = ? OR obj_b = ?)', [o.id, o.id], function(err, rows, results) {
+                        if (!o.type || !o._id || !ObjectID.isValid(o._id))
+                            break;
+
+                        if (o.type === 'icon' || o.type === 'shape' || o.type == 'link') {
+                            var query = {};
+                            if (o.type === 'icon' || o.type === 'shape')
+                                query = { $or: [ { _id: ObjectID(o._id) }, { obj_a: ObjectID(o._id) }, { obj_b: ObjectID(o._id) } ] };
+                            else if (o.type === 'link')
+                                query = { _id: ObjectID(o._id) };
+                            mdb.collection('objects').find(query, { _id: 1 }).toArray(function(err, rows) {
+                                if (!err) {
+                                    async.each(rows, function(row, callback) {
+                                        mdb.collection('objects').updateOne({ _id: ObjectID(row._id) }, { $set: { deleted: true }}, function (err, result) {
                                             if (!err) {
-                                                async.each(rows, function(row, callback) {
-                                                    connection.query('UPDATE objects SET deleted = 1 WHERE id = ?', [row.id], function(err, results) {
-                                                        if (err) {
-                                                            console.log(err);
-                                                            socket.send(JSON.stringify({act: 'error', arg: 'Error: ' + err}));
-                                                        } else {
-                                                            insertLogEvent(socket, 'Deleted object: ' + o.name + '.');
-                                                            sendToRoom(socket.room, JSON.stringify({act: 'delete_object', arg:row.id}));
-                                                        }
-                                                    });
-                                                }, function() {
-                                                    connection.query('SELECT id FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function (err, results) {
-                                                        for (var i = 0; i < results.length; i++) {
-                                                            connection.query('UPDATE objects SET z = ? WHERE id = ?', [i, results[i].id], function (err, results) {
-                                                                if (err) {
-                                                                    console.log(err);
-                                                                    socket.send(JSON.stringify({act: 'error', arg: 'Error: ' + err}));
-                                                                }
-                                                            });
-                                                        }
-                                                    });
-                                                });
+                                                console.log(row._id);
+                                                sendToRoom(socket.room, JSON.stringify({act: 'delete_object', arg:row._id}));
                                             } else
                                                 console.log(err);
                                         });
-                                    } else
-                                        console.log(err);
-                                });
-                            } else if (o.type === 'link') {
-                                connection.query('UPDATE objects SET deleted = 1 WHERE id = ?', [o.id], function (err, results) {
-                                    if (!err) {
-                                        sendToRoom(socket.room, JSON.stringify({act: 'delete_object', arg: o.id}));
-                                        connection.query('SELECT id FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function (err, results) {
-                                            if (!err) {
-                                                insertLogEvent(socket, 'Deleted link: ' + o.name + '.');
-                                                for (var i = 0; i < results.length; i++) {
-                                                    connection.query('UPDATE objects SET z = ? WHERE id = ?', [i, results[i].id], function (err, results) {
-                                                        if (err) {
-                                                            console.log(err);
-                                                            socket.send(JSON.stringify({act: 'error', arg: 'Error: ' + err}));
-                                                        }
-                                                    });
-                                                }
-                                            } else {
-                                                console.log(err);
-                                                socket.send(JSON.stringify({act: 'error', arg: 'Error: ' + err}));
-                                            }
+                                    }, function() {
+                                        mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: false } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                            var zs = rows.map(r => String(r._id));
+                                            async.forEachOf(zs, function(item, index, callback) {
+                                                var new_values = { $set: { z: index }};
+                                                mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                                    if (err)
+                                                        console.log(err);
+                                                    callback();
+                                                });
+                                            });
                                         });
-                                    } else {
-                                        console.log(err);
-                                        socket.send(JSON.stringify({act: 'error', arg: 'Error: ' + err}));
-                                    }
-                                });
-                            }
-                        }
-                    }
-                    break;
-                case 'change_object':
-                    var o = msg.arg;
-                    o.name = xssFilters.inHTMLData(o.name);
-                    o.fill_color = xssFilters.inHTMLData(o.fill_color);
-                    o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
-                    o.image = xssFilters.inHTMLData(o.image);
-                    if (o.type !== undefined && hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        if (o.type === 'icon' || o.type === 'shape') {
-                            connection.query('UPDATE objects SET name = ?, fill_color = ?, stroke_color = ?, image = ?, locked = ? WHERE id = ?', [o.name, o.fill_color, o.stroke_color, o.image, o.locked, o.id], function (err, results) {
-                                if (!err) {
-                                    insertLogEvent(socket, 'Modified object: ' + o.name + ' ID: ' + o.id + '.');
-                                    sendToRoom(socket.room, JSON.stringify({act: 'change_object', arg: msg.arg}));
-                                } else
-                                    console.log(err);
-                            });
-                        } else if (o.type === 'link') {
-                            connection.query('UPDATE objects SET name = ?, stroke_color = ? WHERE id = ?', [o.name, o.stroke_color, o.id], function (err, results) {
-                                if (!err) {
-                                    insertLogEvent(socket, 'Modified link: ' + o.name + ' ID: ' + o.id + '.');
-                                    sendToRoom(socket.room, JSON.stringify({act: 'change_object', arg: msg.arg}));
-                                } else
-                                    console.log(err);
-                            });
-                        }
-                    }
-                    break;
-                case 'move_object':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        if (msg.arg.length === 1 && msg.arg[0].z !== undefined) {
-                            var o = msg.arg[0];
-                            o.z = Math.floor(o.z);
-                            connection.query('SELECT id FROM objects WHERE deleted = 0 AND mission = ? ORDER BY z ASC', [socket.mission], function (err, results) {
-                                var zs = [];
-                                for (var i = 0; i < results.length; i++)
-                                    zs.push(results[i].id);
-                                if (o.z !== zs.indexOf(o.id)) {
-                                    zs.move(zs.indexOf(o.id), o.z);
-                                    async.forEachOf(zs, function(item, index, callback) {
-                                        connection.query('UPDATE objects SET z = ? WHERE id = ?', [index, item], function (err, results) {
-                                            if (err)
-                                                console.log(err);
-                                            callback();
-                                        });
-                                    }, function(err) {
-                                        sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
                                     });
+                                } else {
+                                    console.log(err);
                                 }
                             });
+                        }
+                    }
+                    break;
+
+                case 'change_object':
+                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
+                        var o = msg.arg;
+                        
+                        if (!o._id || !ObjectID.isValid(o._id) || !o.type)
+                            break;
+
+                        o.name = xssFilters.inHTMLData(o.name);
+                        o.fill_color = xssFilters.inHTMLData(o.fill_color);
+                        o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
+                        o.image = xssFilters.inHTMLData(o.image);
+
+                        var new_values = {};
+                        if (o.type === 'icon' || o.type === 'shape')
+                            new_values = { $set: { name: o.name, fill_color: o.fill_color, stroke_color: o.stroke_color, image: o.image, locked: o.locked }};
+                        else if (o.type === 'link')
+                            new_values = { $set: { name: o.name, stroke_color: o.stroke_color }};
+                        else
+                            break;
+                        mdb.collection('objects').updateOne({ _id: ObjectID(o._id) }, new_values, function (err, result) {
+                            if (!err) {
+                                insertLogEvent(socket, 'Modified object: ' + o.name + ' ID: ' + o._id + '.');
+                                sendToRoom(socket.room, JSON.stringify({act: 'change_object', arg: msg.arg}));
+                            } else {
+                                console.log(err);
+                            }
+                        });
+                    }
+                    break;
+
+                case 'move_object':
+                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
+                        // move objects (z-axis)
+                        if (msg.arg.length === 1 && msg.arg[0].z !== undefined && msg.arg[0]._id && ObjectID.isValid(msg.arg[0]._id)) {
+                            var o = msg.arg[0];
+                            o.z = Math.floor(o.z);
+                            mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: false }, { _id: 1, z: 1, name: 1 }).sort({ z: 1 }).toArray(function(err, rows) {  
+                                var zs = rows.map(r => String(r._id));
+                                zs.move(zs.indexOf(String(o._id)), o.z);
+                                async.forEachOf(zs, function(item, index, callback) {
+                                    var new_values = { $set: { z: index }};
+                                    mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                        if (err)
+                                            console.log(err);
+                                        callback();
+                                    });
+                                }, function(err) {
+                                    sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
+                                });
+                            });
+                        // move objects (x/y axis)
                         } else {
                             var args = [];
                             async.eachOf(msg.arg, function(o, index, callback) {
-                                if (o.type !== undefined && (o.type === 'icon' || o.type === 'shape')) {
+                                if (o.type !== undefined && (o.type === 'icon' || o.type === 'shape') && ObjectID.isValid(o._id)) {
                                     o.x = Math.round(o.x);
                                     o.y = Math.round(o.y);
-                                    connection.query('UPDATE objects SET x = ?, y = ?, scale_x = ?, scale_y = ?, rot = ? WHERE id = ?', [o.x, o.y, o.scale_x, o.scale_y, o.rot, o.id], function (err, results) {
+                                    var new_values = { $set: { x: o.x, y: o.y, scale_x: o.scale_x, scale_y: o.scale_y, rot: o.rot }};
+                                    mdb.collection('objects').updateOne({ _id: ObjectID(o._id) }, new_values, function (err, result) {
                                         if (!err) {
                                             args.push(o);
-                                        } else
+                                        } else {
                                             console.log(err);
-                                        callback();
+                                        }
                                     });
                                 }
                             }, function (err) {
@@ -812,11 +1067,13 @@ ws.on('connection', function(socket, req) {
                         }
                     }
                     break;
+
                 case 'change_link':
                     var o = msg.arg;
                     if (o.type !== undefined && o.type === 'link') {
                     }
                     break;
+
             }
             if (msg.msgId !== undefined) {
                 socket.send(JSON.stringify({act: 'ack', arg: msg.msgId}));
@@ -840,15 +1097,20 @@ app.get('/logout', function (req, res) {
 
 app.get('/getroles', function (req, res) {
     if (!req.session.loggedin) {
-        res.end('ERR');
+        res.end('ERR1');
         return;
     }
     var sel = '<select class="tableselect">';
-    connection.query("SELECT id, name FROM roles", function(err, rows, fields) {
-        for (var i = 0; i < rows.length; i++)
-            sel += '<option value="' + rows[i].id + '">' + rows[i].name + '</option>';
-        sel += '</select>';
-        res.end(sel);
+    mdb.collection('roles').find({ deleted: { $ne: true } }, { password: 0 }).toArray(function(err, rows) {
+        if (!err) {
+            for (var i = 0; i < rows.length; i++)
+                sel += '<option value="' + rows[i]._id + '">' + rows[i].name + '</option>';
+            sel += '</select>';
+            res.end(sel);
+        } else {
+            res.end(JSON.stringify('[]'));
+            console.log(err);
+        }
     });
 });
 
@@ -860,100 +1122,114 @@ app.post('/api/alert', function(req, res) {
     msg.channel = req.body.channel;
     msg.text = xssFilters.inHTMLData(req.body.text);
     msg.timestamp = (new Date).getTime();
-    connection.query('SELECT id, username FROM users WHERE api = ? LIMIT 1', [req.body.api], function(err, rows, fields) {
-        if (!err && rows.length > 0) {
-            msg.user_id = rows[0].id;
-            msg.analyst = rows[0].username;
-            connection.query('INSERT INTO log (mission, analyst, channel, text, timestamp) values (?, ?, ?, ?, ?)', [mission, msg.user_id, msg.channel, msg.text, msg.timestamp], function (err, results) {
-                if (!err) {
-                    sendToRoom(mission, JSON.stringify({act:'chat', arg:{messages:[msg]}}));
-                    res.end('OK');
-                } else {
-                    console.log(err);
-                    res.end('ERR');
-                }
-            });
-        } else {
-            console.log(err);
-            res.end('ERR');
-        }
+    mdb.collection('users').findOne({ api: req.body.api, deleted: { $ne: true } }, function(err, row) {
+        msg.user_id = row.id;
+        msg.username = rows.username;
+
     });
-    
 });
 
 app.post('/api/:table', function (req, res) {
     if (!req.session.loggedin) {
-        res.end('ERR');
+        res.end('ERR4');
         return;
     }
     res.writeHead(200, {"Content-Type": "application/json"});
 // MISSIONS
     if (req.params.table !== undefined && req.params.table === 'missions') {
+
+        // get missions
         if (req.body.oper === undefined) {
-            connection.query("SELECT id, name, start_date, (SELECT username FROM users WHERE deleted = 0 AND users.id = analyst) as analyst, (SELECT permissions FROM mission_users_rel WHERE user_id = ? AND mission = missions.id LIMIT 1) as permissions FROM missions WHERE deleted = 0 HAVING permissions IS NOT NULL OR 1 = ?", [req.session.user_id, req.session.user_id], function(err, rows, fields) {
+            mdb.collection('missions').aggregate([
+                {
+                    $match: { deleted: { $ne: true }}
+                },{
+                    $lookup: {
+                        from: 'users',
+                        localField: 'user_id',
+                        foreignField: '_id',
+                        as: 'username'
+                    },
+                },{
+                    $project: {
+                        _id: 1,
+                        name: 1,
+                        start_date: 1,
+                        username: '$username.username'
+                    }
+                }
+            ]).toArray(function(err, rows) {
                 if (!err) {
-                    res.end(JSON.stringify(rows));
+                    res.end(JSON.stringify(rows))
                 } else {
                     res.end(JSON.stringify('[]'));
                     console.log(err);
                 }
             });
-        } else if (req.body.oper === 'edit' && hasPermission(req.session.cop_permissions, 'manage_missions') && req.body.id && req.body.name && req.body.start_date) {
+
+        // edit mission
+        } else if (req.body.oper === 'edit' && hasPermission(req.session.cop_permissions, 'manage_missions') && req.body._id && req.body.name && req.body.start_date) {
+            req.body.name = xssFilters.inHTMLData(req.body.name);
             if (req.body.analyst === undefined || req.body.analyst === '')
                 req.body.analyst = req.session.user_id;
-            connection.query('UPDATE missions SET name = ?, start_date = ?, analyst = ? WHERE id = ?', [req.body.name, req.body.start_date, req.body.analyst, req.body.id], function (err, results) {
+            else
+                req.body.analyst = xssFilters.inHTMLData(req.body.analyst);
+            var new_values = { $set: { name: req.body.name, start_date: req.body.start_date }};
+            mdb.collection('missions').updateOne({ _id: ObjectID(req.body._id) }, new_values, function (err, result) {
+                if (!err) {
+                    res.end(JSON.stringify('OK'));
+                } else {
+                    res.end(JSON.stringify('ERR5'));
+                    console.log(err);
+                }
+            });
+
+        // add mission
+        } else if (req.body.oper === 'add' && hasPermission(req.session.cop_permissions, 'manage_missions') && req.body.name && req.body.start_date) {
+            req.body.name = xssFilters.inHTMLData(req.body.name);
+            var mission = { name: req.body.name, start_date: req.body.start_date, user_id: ObjectID(req.session.user_id), mission_users: [], deleted: false };
+            mission.mission_users[0] = { _id: ObjectID(null), user_id: ObjectID(req.session.user_id), permissions: ['all'], role: null };
+            mdb.collection('missions').insertOne(mission, function (err, result) {
                 if (!err) {
                     res.end(JSON.stringify('OK'));
                 } else {
                     console.log(err);
-                    res.end(JSON.stringify('ERR'));
+                    res.end(JSON.stringify('ERR6'));
                 }
             });
-        } else if (req.body.oper === 'add' && hasPermission(req.session.cop_permissions, 'manage_missions') && req.body.name && req.body.start_date) {
-            if (req.body.analyst === undefined)
-                req.body.analyst = req.session.user_id;
-            connection.query('INSERT INTO missions (name, start_date, analyst) values (?, ?, ?)', [req.body.name, req.body.start_date, req.body.analyst], function (err, results) {
+
+        // delete mission
+        } else if (req.body.oper === 'del' && hasPermission(req.session.cop_permissions, 'delete_missions') && req.body._id !== undefined) {
+            mdb.collection('missions').updateOne({ _id: ObjectID(req.body._id) }, { deleted: true }, function (err, result) {
                 if (!err) {
-                    var i =  results.insertId;
-                    connection.query('INSERT INTO mission_users_rel (user_id, mission, permissions) values (?, ?, ?)', [req.session.user_id, i, 'all'], function (err, results) {
-                        if (req.session.user_id !== 1)
-                            connection.query('INSERT INTO mission_users_rel (user_id, mission, permissions) values (?, ?, ?)', [1, i, 'all']); // make sure admin gets all perms
-                        res.end(JSON.stringify('OK'));
-                    });
+                    res.end(JSON.stringify('OK'));
+                    //TODO: Also delete objects when they are mongo'ed
                 } else {
                     console.log(err);
-                    res.end(JSON.stringify('ERR'));
+                    res.end(JSON.stringify('ERR17'));
                 }
             });
-        } else if (req.body.oper === 'del' && hasPermission(req.session.cop_permissions, 'delete_missions') && req.body.id !== undefined) {
-            var id = JSON.parse(req.body.id);
-            connection.query('UPDATE missions SET deleted = 1 WHERE id = ?', [id], function (err, results) {
-                if (!err) {
-                    connection.query('UPDATE objects SET deleted = 1 WHERE mission = ?', [id], function (err, results) {
-                        if (!err) {
-                            res.end(JSON.stringify('OK'));
-                        } else {
-                            res.end(JSON.stringify('ERR'));
-                            console.log(err);
-                        }
-                    });
-                } else
-                    console.log(err);
-            });
+
+        } else {
+            res.end(JSON.stringify('ERR14'));
         }
+
 // USERS
     } else if (req.params.table !== undefined && req.params.table === 'users' && hasPermission(req.session.cop_permissions, 'manage_users')) {
+        // get users
         if (req.body.oper === undefined) {
-            connection.query("SELECT id, username, name, '********' as password, avatar, permissions FROM users WHERE deleted = 0", function(err, rows, fields) {
+            mdb.collection('users').find({ deleted: { $ne: true }}, { password: 0 }).toArray(function(err, rows) {
                 if (!err) {
-                    res.end(JSON.stringify(rows));
+                    res.end(JSON.stringify(rows))
                 } else {
                     res.end(JSON.stringify('[]'));
                     console.log(err);
                 }
             });
-        } else if (req.body.oper !== undefined && req.body.oper === 'edit' && req.body.name !== undefined && req.body.id) {
-            if (req.body.id === '1')
+
+        // edit user
+        } else if (req.body.oper !== undefined && req.body.oper === 'edit' && req.body.name !== undefined && req.body._id) {
+            if (req.body.name === 'admin')
                 req.body.permissions = 'all'; // make sure admin always has all permissions
             else {
                 if (req.body.role === undefined || req.body.role === '')
@@ -966,162 +1242,157 @@ app.post('/api/:table', function (req, res) {
                 }
                 req.body.permissions = new_perms.join(',');
             }
-            if (req.body.password !== '********') {
+            if (req.body.password !== '') {
                 bcrypt.hash(req.body.password, null, null, function(err, hash) {
-                    connection.query('UPDATE users SET name = ?, password = ?, permissions = ? WHERE id = ?', [req.body.name, hash, req.body.permissions, req.body.id], function (err, results) {
+                    var new_values = { $set: { name: req.body.name, permissions: req.body.permissions, password: hash }};
+                    mdb.collection('users').updateOne({ _id: ObjectID(req.body._id) }, new_values, function (err, result) {
                         if (!err) {
                             res.end(JSON.stringify('OK'));
                         } else {
-                            res.end(JSON.stringify('ERR'));
+                            res.end(JSON.stringify('ERR8'));
                             console.log(err);
                         }
                     });
                 });
+    
+            // update user
             } else {
-                var query = 'UPDATE users SET name = ?, permissions = ? WHERE id = ?';
-                var args = [req.body.name, req.body.permissions, req.body.id];
-                connection.query(query, args, function (err, results) {
+                var new_values = { $set: { name: req.body.name, permissions: req.body.permissions }};
+                mdb.collection('users').updateOne({ _id: ObjectID(req.body._id) }, new_values, function (err, result) {
                     if (!err) {
                         res.end(JSON.stringify('OK'));
                     } else {
-                        res.end(JSON.stringify('ERR'));
+                        res.end(JSON.stringify('ERR9'));
                         console.log(err);
                     }
                 });
             }
+
+        // add user
         } else if (req.body.oper !== undefined && req.body.oper === 'add' && req.body.username && req.body.name !== undefined) {
             bcrypt.hash(req.body.password, null, null, function(err, hash) {
                 if (req.body.role === undefined || req.body.role === '')
                     req.body.role = null;
                 if (req.body.permissions === undefined || req.body.permissions === '')
                     req.body.permissions = null;
-                var api = crypto.randomBytes(32).toString('hex'); 
-                connection.query('INSERT INTO users (username, name, password, permissions, api) values (?, ?, ?, ?, ?)', [req.body.username, req.body.name, hash, req.body.permissions, api], function (err, results) {
+                var api = crypto.randomBytes(32).toString('hex');
+                var user = { username: req.body.username, name: req.body.name, password: hash, permissions: req.body.permissions, api: api, avatar: '', deleted: false };
+                mdb.collection('users').insertOne(user, function (err, result) {
                     if (!err) {
                         res.end(JSON.stringify('OK'));
                     } else {
-                        res.end(JSON.stringify('ERR'));
                         console.log(err);
+                        res.end(JSON.stringify('ERR13'));
                     }
                 });
             });
-        } else if (req.body.oper !== undefined && req.body.oper === 'del' && req.body.id !== undefined) {
-            var id = JSON.parse(req.body.id);
-            if (req.body.id === 1) // don't delete admin
-                res.end(JSON.stringify('ERR'));
+
+        // delete user
+        } else if (req.body.oper !== undefined && req.body.oper === 'del' && req.body._id !== undefined) {
+            if (req.body.name === 'admin') // don't delete admin
+                res.end(JSON.stringify('ERR12'));
             else {
-                if (id != 0) {
-                    connection.query('UPDATE users SET deleted = 1 WHERE id = ?', [id], function (err, results) {
-                        if (!err) {
-                            res.end(JSON.stringify('OK'));
-                        } else {
-                            console.log(err);
-                            res.end(JSON.stringify('ERR'));
-                        }
-                    });
-                }
+                mdb.collection('users').updateOne({ _id: ObjectID(req.body._id) }, { deleted: true }, function (err, result) {
+                    if (!err) {
+                        res.end(JSON.stringify('OK'));
+                    } else {
+                        console.log(err);
+                        res.end(JSON.stringify('ERR13'));
+                    }
+                });
             }
         } else {
-            res.end(JSON.stringify('ERR'));
+            res.end(JSON.stringify('ERR14'));
         }
+
 // ROLES
     } else if (req.params.table !== undefined && req.params.table === 'roles' && hasPermission(req.session.cop_permissions, 'manage_roles')) {
+        // get roles
         if (req.body.oper === undefined) {
-            connection.query("SELECT r.id, r.name, (SELECT GROUP_CONCAT(name) FROM roles WHERE id in (SELECT sub_role_id FROM sub_role_rel WHERE sub_role_rel.role_id = r.id)) as sub_roles FROM roles AS r", function(err, rows, fields) {
+
+            mdb.collection('roles').aggregate([
+                {
+                    $match: { deleted: { $ne: true }}
+                },{
+                    $lookup: {
+                        from: 'roles',
+                        localField: 'sub_roles',
+                        foreignField: '_id',
+                        as: 'sub_role'
+                    },
+                },{
+                    $project: {
+                        _id: 1,
+                        name: 1,
+                        sub_roles:'$sub_role.name'
+                    }
+                }
+            ]).toArray(function(err, rows) {
                 if (!err) {
-                    res.end(JSON.stringify(rows));
+                    res.end(JSON.stringify(rows))
                 } else {
                     res.end(JSON.stringify('[]'));
                     console.log(err);
                 }
             });
-        } else if (req.body.oper !== undefined && req.body.oper === 'edit' && req.body.name && req.body.id) {
-            connection.query('UPDATE roles SET name = ? WHERE id = ?', [req.body.name, req.body.id], function (err, results) {
-                if (!err) {
-                    if (!req.body.sub_roles)
-                        req.body.sub_roles = '';
-                    var sub_roles = [];
-                    req.body.sub_roles = req.body.sub_roles.split(',');
-                    for (var i = 0; i < req.body.sub_roles.length; i++) {
-                        if (!isNaN(req.body.sub_roles[i])  && req.body.sub_roles[i] !== '')
-                            sub_roles.push(parseInt(req.body.sub_roles[i]));
-                    }
-                    connection.query('SELECT id, sub_role_id FROM sub_role_rel WHERE role_id = ?', [req.body.id], function (err, results) {
-                        if (err) {
-                            res.end(JSON.stringify('ERR'));
-                            console.log(err);
-                        } else {
-                            var curr_roles = [];
-                            for (var j = 0; j < results.length; j++) {
-                                curr_roles.push(results[j].sub_role_id);
-                            }
-                            var additions = sub_roles.filter(x => curr_roles.indexOf(x) < 0 );
-                            var subtractions = curr_roles.filter(x => sub_roles.indexOf(x) < 0 );
-                            if (subtractions.length === 0)
-                                subtractions = '';
-                            connection.query('DELETE FROM sub_role_rel WHERE role_id = ? AND sub_role_id IN (?)', [req.body.id, subtractions], function (err, results) {
-                                if (err) {
-                                    console.log(err);
-                                    res.end(JSON.stringify('ERR'));
-                                } else {
-                                    if (additions.length === 0)
-                                        res.end(JSON.stringify('OK'));
-                                    else {
-                                        for (i = 0; i < additions.length; i++) {
-                                            connection.query('INSERT INTO sub_role_rel (role_id, sub_role_id) values (?, ?)', [req.body.id, additions[i]], function (err, results) {
-                                                if (err) {
-                                                    res.end(JSON.stringify('ERR'));
-                                                    console.log(err);
-                                                } else if (i === additions.length) {
-                                                    res.end(JSON.stringify('OK'));
-                                                }
-                                            });
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    });
-                } else {
-                    res.end(JSON.stringify('ERR'));
-                    console.log(err);
-                }
-            });
-        } else if (req.body.oper !== undefined && req.body.oper === 'add' && req.body.name) {
-            connection.query('INSERT INTO roles (name) values (?)', [req.body.name], function (err, results) {
+
+        // edit role
+        } else if (req.body.oper !== undefined && req.body.oper === 'edit' && req.body.name && req.body._id) {
+            req.body.name = xssFilters.inHTMLData(req.body.name);
+            if (req.body.sub_roles)
+                req.body.sub_roles = req.body.sub_roles.split(',').map(i => ObjectID(i));
+            var new_values = { $set: { name: req.body.name, sub_roles: req.body.sub_roles }};
+            mdb.collection('roles').updateOne({ _id: ObjectID(req.body._id) }, new_values, function (err, result) {
                 if (!err) {
                     res.end(JSON.stringify('OK'));
                 } else {
-                    res.end(JSON.stringify('ERR'));
                     console.log(err);
+                    res.end(JSON.stringify('ERR13'));
                 }
             });
-        } else if (req.body.oper !== undefined && req.body.oper === 'del' && req.body.id !== undefined) {
-            var id = JSON.parse(req.body.id);
-            if (id != 0) {
-                connection.query('DELETE FROM roles WHERE id = ?', [id], function (err, results) {
-                    if (!err) {
-                        res.end(JSON.stringify('OK'));
-                    } else {
-                        console.log(err);
-                        res.end(JSON.stringify('ERR'));
-                    }
-                });
-            }
+
+        // add role
+        } else if (req.body.oper !== undefined && req.body.oper === 'add' && req.body.name) {
+            req.body.name = xssFilters.inHTMLData(req.body.name);
+            var role = { name: req.body.name, sub_roles: [], deleted: false };
+            mdb.collection('roles').insertOne(role, function (err, result) {
+                if (!err) {
+                    res.end(JSON.stringify('OK'));
+                } else {
+                    console.log(err);
+                    res.end(JSON.stringify('ERR19'));
+                }
+            });
+
+        // delete role
+        } else if (req.body.oper !== undefined && req.body.oper === 'del' && req.body._id !== undefined) {
+            mdb.collection('roles').updateOne({ _id: ObjectID(req.body._id) }, { deleted: true }, function (err, result) {
+                if (!err) {
+                    res.end(JSON.stringify('OK'));
+                } else {
+                    console.log(err);
+                    res.end(JSON.stringify('ERR20'));
+                }
+            })
+        } else {
+            res.end(JSON.stringify('ERR21'));
         }
+
+    // change password
     } else if (req.params.table !== undefined && req.params.table === 'change_password') {
         bcrypt.hash(req.body.newpass, null, null, function(err, hash) {
-            connection.query('UPDATE users SET password = ? WHERE id = ?', [hash, req.session.user_id], function (err, results) {
+            mdb.collection('users').updateOne({ _id: ObjectID(req.session.user_id) }, { $set: { password: hash }}, function (err, result) {
                 if (!err) {
                     res.end(JSON.stringify('OK'));
                 } else {
-                    res.end(JSON.stringify('ERR'));
+                    res.end(JSON.stringify('ERR21'));
                     console.log(err);
                 }
             });
         });
+
     } else {
-        res.end(JSON.stringify('ERR'));
+        res.end(JSON.stringify('ERR22'));
     }
 });
 
@@ -1149,27 +1420,27 @@ app.get('/cop', function (req, res) {
     var mission_role = null;
     var mission_permissions = null;
     if (req.session.loggedin) {
-        if (req.query.mission !== undefined && req.query.mission > 0) {
+        if (req.query.mission !== undefined && req.query.mission) {
             fs.readdir('./public/images/icons', function(err, icons) {
                 fs.readdir('./public/images/shapes', function(err, shapes) {
                     fs.readdir('./public/images/links', function(err, links) {
-                        connection.query('SELECT name FROM missions WHERE id = ? LIMIT 1', [req.query.mission], function (err, rows, fields) {
+                        mdb.collection('missions').findOne({ _id: ObjectID(req.query.mission), deleted: { $ne: true }}, { password: 0 }, function(err, row) {
                             if (!err) {
-                                var mission_name = rows[0].name;
-                                connection.query('SELECT role, permissions FROM mission_users_rel WHERE user_id = ? AND mission = ?', [req.session.user_id, req.query.mission], function (err, rows, fields) {
-                                    if (!err && rows.length > 0) {
-                                        mission_role = rows[0].role;
-                                        mission_permissions = rows[0].permissions;
-                                    }
-                                    if (req.session.user_id === 1)
+                                var mission_name = row.name;
+                            //    connection.query('SELECT role, permissions FROM mission_users_rel WHERE user_id = ? AND mission = ?', [req.session.user_id, req.query.mission], function (err, rows, fields) {
+                              //      if (!err && rows.length > 0) {
+                                //        mission_role = rows[0].role;
+                                  //      mission_permissions = rows[0].permissions;
+//                                    }
+                                   // if (req.session.username === 'admin')
                                         mission_permissions = 'all'; //admin has all permissions
                                     req.session.mission_role[req.query.mission] = mission_role;
                                     req.session.mission_permissions[req.query.mission] = mission_permissions;
-                                    if (req.session.user_id === 1 || (mission_permissions && mission_permissions !== '')) // always let admin in
+                                    if (req.session.username === 'admin' || (mission_permissions && mission_permissions !== '')) // always let admin in
                                         res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, username: req.session.username, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
                                     else
                                         res.redirect('login');
-                                });
+                                //});
                             } else {
                                 console.log(err);
                                 res.redirect('login');
@@ -1188,36 +1459,34 @@ app.get('/cop', function (req, res) {
 
 app.post('/login', function (req, res) {
     if (req.body.username !== undefined && req.body.username !== '' && req.body.password !== undefined && req.body.password !== '') {
-        connection.query('SELECT id, username, name, password, permissions FROM users WHERE deleted = 0 AND username = ?', [req.body.username], function (err, rows, fields) {
-            if (!err) {
-                if (rows.length === 1) {
-                    bcrypt.compare(req.body.password, rows[0].password, function(err, bres) {
-                        if (bres) {
-                            req.session.user_id = rows[0].id;
-                            req.session.name = rows[0].name;
-                            req.session.username = rows[0].username;
-                            req.session.loggedin = true;
-                            req.session.role = rows[0].role;
-                            req.session.sub_roles = [];
-                            req.session.cop_permissions = rows[0].permissions;
-                            req.session.mission_permissions = {};
-                            req.session.mission_role = {};
-                            req.session.mission_sub_roles = {};
+        mdb.collection('users').findOne({ username: { $eq: req.body.username }}, function(err, row) {
+            if (!err && row) {
+                bcrypt.compare(req.body.password, row.password, function(err, bres) {
+                    if (bres) {
+                        req.session.user_id = row._id;
+                        req.session.name = row.name;
+                        req.session.username = row.username;
+                        req.session.loggedin = true;
+                        req.session.role = row.role;
+                        req.session.sub_roles = [];
+                        req.session.cop_permissions = row.permissions;
+                        req.session.mission_permissions = {};
+                        req.session.mission_role = {};
+                        req.session.mission_sub_roles = {};
 //                            connection.query('SELECT sub_role_id FROM sub_role_rel WHERE role_id = ?', [rows[0].role], function (err, rows, fields) {
-  //                               if (!err) {
-    //                                for (var i = 0; i < rows.length; i++) {
-      //                                  req.session.sub_roles.push(rows[i].sub_role_id);
-        //                            }
-          //                      }
-                                res.redirect('login');
-            //                });
-                        } else
-                            res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
-                    });
-                } else {
-                    console.log(err);
-                    res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
-                }
+//                               if (!err) {
+//                                for (var i = 0; i < rows.length; i++) {
+  //                                  req.session.sub_roles.push(rows[i].sub_role_id);
+    //                            }
+      //                      }
+                            res.redirect('login');
+        //                });
+                    } else
+                        res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
+                });
+            } else {
+                console.log(err);
+                res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
             }
         });
     } else {
@@ -1237,7 +1506,7 @@ app.get('/login', function (req, res) {
 
 app.post('/dir/', function (req, res) {
     if (!req.session.loggedin) {
-        res.end('ERR');
+        res.end('ERR23');
         return;
     }
     var dir = req.body.id;
@@ -1271,7 +1540,7 @@ app.use('/download', express.static(path.join(__dirname, 'mission-files'), {
 
 app.post('/mkdir', function (req, res) {
     if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
-        res.end('ERR');
+        res.end('ERR2424');
         return;
     }
     var id = req.body.id;
@@ -1303,7 +1572,7 @@ app.post('/mkdir', function (req, res) {
 
 app.post('/mv', function (req, res) {
     if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
-        res.end('ERR');
+        res.end('ERR25');
         return;
     }
     var dst = req.body.dst;
@@ -1338,7 +1607,7 @@ app.post('/mv', function (req, res) {
 
 app.post('/delete', function (req, res) {
     if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
-        res.end('ERR');
+        res.end('ERR26');
         return;
     }
     var id = req.body.id;
@@ -1375,7 +1644,7 @@ app.post('/delete', function (req, res) {
 
 app.post('/upload', upload.any(), function (req, res) {
     if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
-        res.end('ERR');
+        res.end('ERR27');
         return;
     }
     if (req.body.dir && req.body.dir.indexOf('_anchor') && req.body.mission) {
@@ -1399,7 +1668,7 @@ app.post('/upload', upload.any(), function (req, res) {
 
 app.post('/avatar', upload.any(), function (req, res) {
     if (!req.session.loggedin || (!hasPermission(req.session.cop_permissions, 'modify_users') && req.session.user_id !== parseInt(req.body.id))) {
-        res.end('ERR');
+        res.end('ERR28');
         return;
     }
     if (req.body.id && !isNaN(req.body.id)) {
@@ -1412,11 +1681,11 @@ app.post('/avatar', upload.any(), function (req, res) {
                     callback();
             });
         }, function() {
-            connection.query('UPDATE users SET avatar = ? WHERE id = ?', [req.body.id + '.png', req.body.id], function (err, results) {
+            mdb.collection('users').updateOne({ _id: ObjectID(req.body.id) }, { $set: { avatar: req.body.id + '.png' }}, function (err, result) {
                 if (!err) {
                     res.end(JSON.stringify('OK'));
                 } else {
-                    res.end(JSON.stringify('ERR'));
+                    res.end(JSON.stringify('ERR21'));
                     console.log(err);
                 }
             });

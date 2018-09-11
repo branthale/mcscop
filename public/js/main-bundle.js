@@ -14265,7 +14265,7 @@ function deleteRowConfirm(table, id) {
 
 function deleteRow(table, id) {
     $(table).jqGrid('delRowData', id);
-    var data = { oper: 'del', id: id }
+    var data = { oper: 'del', _id: id }
     $.ajax({
         url: 'api/missions',
         type: 'POST',
@@ -14349,7 +14349,7 @@ $(document).ready(function() {
                     return buttons;
                 }
             },
-            { label: 'Mission Id', name: 'id', width: 15, key: true, editable: false },
+            { label: 'Mission Id', name: '_id', width: 15, key: true, editable: false },
             { label: 'Mission Name', name: 'name', width: 45, editable: missions_rw, edittype: 'text', formatter: 'showlink', formatoptions: {
                     baseLinkUrl: 'cop',
                     idName: 'mission'
@@ -14373,7 +14373,7 @@ $(document).ready(function() {
                 },
                 defaultValue: getDate()
             }},
-            { label: 'Battle Captain', name: 'analyst', width: 30, editable: false },
+            { label: 'Battle Captain', name: 'username', width: 30, editable: false },
         ],
         sortable: true,
         serializeRowData: function (data) {

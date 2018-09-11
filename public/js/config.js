@@ -109,7 +109,7 @@ function deleteRow(e, type, table, id) {
     $.ajax({
         url: 'api/' + type,
         type: 'POST',
-        data: {id: id, table: table, oper: 'del'},
+        data: {_id: id, table: table, oper: 'del'},
         dataType: 'json',
         cache: false,
         success: function(data) {
@@ -172,7 +172,7 @@ $(document).ready(function() {
                         keys: true,
                     }
                 },
-                { label: 'Role Id', name: 'id', key: true, editable: false, hidden: true},
+                { label: 'Role Id', name: '_id', key: true, editable: false, hidden: true},
                 { label: 'Name', name: 'name', width: 50, editable: roles_rw, edittype: 'text' },
                 { label: 'Sub-Roles', name: 'sub_roles', width: 150, editable: roles_rw, edittype: 'select', editoptions: {
                         dataUrl: 'getroles',
@@ -265,7 +265,7 @@ $(document).ready(function() {
                         keys: true,
                     }
                 },
-                { label: 'id', name: 'id', key: true, editable: false, hidden: true },
+                { label: '_id', name: '_id', key: true, editable: false, hidden: true },
                 { label: 'Avatar', name: 'avatar', width: 53, fixed: true, editable: false, formatter: function (c, o, r) {
                         if (r.avatar !== null)
                             return '<img class="droppable avatar" id="avatar_' + r.id + '" src="images/avatars/' + r.id + '.png"/>';
