@@ -194,9 +194,9 @@ ws.on('connection', function(socket, req) {
     socket.loggedin = false;
     socket.session = '';
     socket.mission = 0;
-    session = req.headers.cookie.split('session=s%3A')[1].split('.')[0];
-    if (session) {
-        socket.session = session;
+    var s = req.headers.cookie.split('session=s%3A')[1].split('.')[0];
+    if (s) {
+        socket.session = s;
         mdb.collection('sessions').findOne({ _id: session }, function(err, row) {
             if (row) {
                 try {
