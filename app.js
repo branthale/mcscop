@@ -1,36 +1,35 @@
 // cop fqdn.  Don't include http, https, etc.
-var url = 'www.ironrain.org'
+const url = 'www.ironrain.org'
 
 // enable content security policy (this requires url to be set!)
-var cspEnabled = false;
+const cspEnabled = false;
 
-var express = require('express');
-var fs = require('fs');
-var app = express();
-var multer = require('multer');
-var ShareDB = require('sharedb');
-var richText = require('rich-text');
-var WebSocketJSONStream = require('websocket-json-stream');
-var http = require('http').Server(app);
-var session = require('express-session');
-var xssFilters = require('xss-filters');
-var cookieParser = require('cookie-parser');
-var bcrypt = require('bcrypt-nodejs');
-var bodyParser = require('body-parser');
-var wss = require('ws');
-var async = require('async');
-var path = require('path');
-var crypto = require('crypto');
-var MongoClient = require('mongodb').MongoClient;
-var MongoStore = require('connect-mongo')(session);
-var ObjectID = require('mongodb').ObjectID;
-var rooms = new Map();
-var connection;
-var ws = new wss.Server({server:http});
-var upload = multer({dest: './temp_uploads'});
+const express = require('express');
+const fs = require('fs');
+const app = express();
+const multer = require('multer');
+const ShareDB = require('sharedb');
+const richText = require('rich-text');
+const WebSocketJSONStream = require('websocket-json-stream');
+const http = require('http').Server(app);
+const session = require('express-session');
+const xssFilters = require('xss-filters');
+const cookieParser = require('cookie-parser');
+const bcrypt = require('bcrypt-nodejs');
+const bodyParser = require('body-parser');
+const wss = require('ws');
+const async = require('async');
+const path = require('path');
+const crypto = require('crypto');
+const MongoClient = require('mongodb').MongoClient;
+const MongoStore = require('connect-mongo')(session);
+const ObjectID = require('mongodb').ObjectID;
+const rooms = new Map();
+const ws = new wss.Server({server:http});
+const upload = multer({dest: './temp_uploads'});
 
-var cop_permissions = ['all', 'manage_missions', 'delete_missions', 'manage_users', 'manage_roles'];
-var mission_permissions = ['all', 'manage_users', 'modify_diagram', 'create_events', 'delete_events', 'modify_notes', 'create_opnotes', 'delete_opnotes', 'modify_files'];
+const cop_permissions = ['all', 'manage_missions', 'delete_missions', 'manage_users', 'manage_roles'];
+const mission_permissions = ['all', 'manage_users', 'modify_diagram', 'create_events', 'delete_events', 'modify_notes', 'create_opnotes', 'delete_opnotes', 'modify_files', 'api_access'];
 
 app.set('view engine', 'pug');
 app.use(express.static('public'));
@@ -64,9 +63,9 @@ MongoClient.connect('mongodb://localhost/mcscop', function(err, database) {
     mdb = database;
 });
 
-var db = require('sharedb-mongo')('mongodb://localhost:27017/mcscop');
+const sdb = require('sharedb-mongo')('mongodb://localhost:27017/mcscop');
 ShareDB.types.register(richText.type);
-var backend = new ShareDB({db: db, disableDocAction: true, disableSpaceDelimitedActions: true});
+const backend = new ShareDB({sdb: sdb, disableDocAction: true, disableSpaceDelimitedActions: true});
 
 Array.prototype.move = function (old_index, new_index) {
     if (new_index >= this.length) {
@@ -199,7 +198,7 @@ ws.on('connection', function(socket, req) {
     if (session) {
         socket.session = session;
         mdb.collection('sessions').findOne({ _id: session }, function(err, row) {
-            if (!err) {
+            if (row) {
                 try {
                     var data = JSON.parse(row.session);
                     socket.loggedin = data.loggedin;
@@ -213,7 +212,7 @@ ws.on('connection', function(socket, req) {
                 } catch (e) {
                     console.log(e);
                 }
-            } else
+            } else if (err)
                 console.log(err);
         });
     }
@@ -223,11 +222,14 @@ ws.on('connection', function(socket, req) {
         } catch (e) {
             return;
         }
+
+        console.log(msg, socket.type);
         
         if (msg.act && ((msg.act === 'stream' || msg.act === 'join') || (socket.mission && ObjectID.isValid(socket.mission) && socket.user_id && ObjectID.isValid(socket.user_id))) && socket.loggedin) {
             switch (msg.act) {
                 case 'stream':
                     var stream = new WebSocketJSONStream(socket);
+                    socket.type = 'sharedb';
                     backend.listen(stream);
                     break;
 
@@ -237,6 +239,7 @@ ws.on('connection', function(socket, req) {
                     if (!rooms.get(msg.arg.mission))
                         rooms.set(msg.arg.mission, new Set());
                     rooms.get(msg.arg.mission).add(socket);
+                    socket.type = 'diagram';
                     break;
 
                 // ------------------------- CHATS -------------------------
@@ -285,8 +288,7 @@ ws.on('connection', function(socket, req) {
                                 username: '$username.username'
                             }
                     }]).toArray(function(err, rows) {
-                        
-                        if (!err) {
+                        if (rows) {
                             if (rows.length == 50)
                                 if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from))
                                     rows[49].more = 1;
@@ -295,7 +297,8 @@ ws.on('connection', function(socket, req) {
                             socket.send(JSON.stringify({act:'bulk_chat', arg:{messages:rows}}));
                         } else {
                             socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
-                            console.log(err);
+                            if (err)
+                                console.log(err);
                         }
                     });
                     break;
@@ -303,7 +306,7 @@ ws.on('connection', function(socket, req) {
                 case 'get_all_chats':
                     var res = [];
                     mdb.collection('chats').distinct('channel', function(err, channels) {
-                        if (!err) {
+                        if (channels) {
                             async.each(channels, function(channel, callback) {
                                 mdb.collection('chats').aggregate([
                                     {
@@ -331,7 +334,7 @@ ws.on('connection', function(socket, req) {
                                             username: '$username.username'
                                         }
                                 }]).toArray(function(err, rows) {
-                                    if (!err) {
+                                    if (rows) {
                                         if (rows.length == 50)
                                             if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from))
                                                 rows[49].more = 1;
@@ -341,26 +344,31 @@ ws.on('connection', function(socket, req) {
                                         callback();
                                     } else {
                                         socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
-                                        console.log(err);
+                                        if (err)
+                                            console.log(err);
                                     }
                                 });
                             }, function(err) {
                                 if (!err)
                                     socket.send(JSON.stringify({ act:'bulk_chat', arg:{ messages:res } }));
                             });
-                        } else
-                            console.log(err);
+                        } else {
+                                socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
+                            if (err)
+                                console.log(err);
+                        }
                     });
                     break;
 
                 // ------------------------- ROLES -------------------------
                 case 'get_roles':
                     mdb.collection('roles').find({ deleted: { $ne: true }}).toArray(function(err, rows) {
-                        if (!err) {
+                        if (rows) {
                             socket.send(JSON.stringify({ act: 'all_roles', arg: rows }))
                         } else {
                             socket.send(JSON.stringify({ act: 'all_roles', arg: '[]' }));
-                            console.log(err);
+                            if (err)
+                                console.log(err);
                         }
                     });
                     break;
@@ -368,11 +376,12 @@ ws.on('connection', function(socket, req) {
                 // ------------------------- USERS -------------------------
                 case 'get_users':
                     mdb.collection('users').find({ deleted: { $ne: true } }, { username: 1 }).toArray(function(err, rows) {
-                        if (!err) {
+                        if (rows) {
                             socket.send(JSON.stringify({ act: 'all_users', arg: rows }))
                         } else {
                             socket.send(JSON.stringify({ act: 'all_users', arg: '[]' }));
-                            console.log(err);
+                            if (err)
+                                console.log(err);
                         }
                     });
                     break;
@@ -400,11 +409,12 @@ ws.on('connection', function(socket, req) {
                             }
                         }
                     ]).toArray(function(err, rows) {
-                        if (!err) {
+                        if (rows) {
                             socket.send(JSON.stringify({ act: 'all_user_settings', arg: rows }));
                         } else {
                             socket.send(JSON.stringify({ act: 'all_user_settings', arg: '[]' }));
-                            console.log(err);
+                            if (err)
+                                console.log(err);
                         }
                     });
                     break;
@@ -490,8 +500,8 @@ ws.on('connection', function(socket, req) {
                 case 'get_notes':
                     var args = [socket.mission];
 
-                    mdb.collection('notes').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: false } ] }).sort({ name : 1 }).toArray(function(err, rows) {
-                        if (!err) {
+                    mdb.collection('notes').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: { $ne: true } } ] }).sort({ name : 1 }).toArray(function(err, rows) {
+                        if (rows) {
                             var resp = new Array();
                             for (var i = 0; i < rows.length; i++) {
                                 resp.push({
@@ -511,8 +521,10 @@ ws.on('connection', function(socket, req) {
                                 });
                             }
                             socket.send(JSON.stringify({act:'all_notes', arg:resp}));
-                        } else
-                            console.log(err);
+                        } else { 
+                            if (err)
+                                console.log(err);
+                        }
                     });
                     break;
 
@@ -620,10 +632,12 @@ ws.on('connection', function(socket, req) {
                             }
                         }
                     ]).toArray(function(err, rows) {
-                        if (!err) {
+                        if (rows) {
                             socket.send(JSON.stringify({ act:'all_events', arg:rows }))
-                        } else
-                            console.log(err);
+                        } else {
+                            if (err)
+                                console.log(err);
+                        }
                     });
                     break;
 
@@ -746,10 +760,12 @@ ws.on('connection', function(socket, req) {
                             }
                         }
                     ]).toArray(function(err, rows) {
-                        if (!err) {
+                        if (rows) {
                             socket.send(JSON.stringify({ act:'all_opnotes', arg:rows }))
-                        } else
-                            console.log(err);
+                        } else {
+                            if (err)
+                                console.log(err);
+                        }
                     });
                     break;
 
@@ -832,12 +848,13 @@ ws.on('connection', function(socket, req) {
 
                 // ------------------------- OBJECTS -------------------------
                 case 'get_objects':
-                    mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: false }).sort({ z: 1 }).toArray(function(err, rows) {
-                        if (!err) {
+                    mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: { $ne: true } }).sort({ z: 1 }).toArray(function(err, rows) {
+                        if (rows) {
                             socket.send(JSON.stringify({ act:'all_objects', arg:rows }))
                         } else {
                             socket.send(JSON.stringify('[]'));
-                            console.log(err);
+                            if (err)
+                                console.log(err);
                         }
                     });
                     break;
@@ -849,8 +866,8 @@ ws.on('connection', function(socket, req) {
                         if (!o._id || !ObjectID.isValid(o._id))
                             break;
 
-                        mdb.collection('objects').findOne({ _id: ObjectID(o._id), deleted: false}, function(err, row) {
-                            if  (!err) {
+                        mdb.collection('objects').findOne({ _id: ObjectID(o._id), deleted: { $ne: true }}, function(err, row) {
+                            if  (row) {
                                 row._id = ObjectID(null);
                                 row.z = o.z;
 
@@ -869,8 +886,10 @@ ws.on('connection', function(socket, req) {
                                     } else
                                         console.log(err);
                                 });
-                            } else
-                                console.log(err);
+                            } else {
+                                if (err)
+                                    console.log(err);
+                            }
                         });
                     }
                     break;
@@ -917,7 +936,7 @@ ws.on('connection', function(socket, req) {
                                         if (!err) {
                                             // if link, push to back
                                             if (o.type === 'link') {
-                                                mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: false } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                                mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: { $ne: true } } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
                                                     var zs = rows.map(r => String(r._id));
                                                     zs.move(zs.indexOf(String(object._id)), 0);
                                                     async.forEachOf(zs, function(item, index, callback) {
@@ -972,7 +991,7 @@ ws.on('connection', function(socket, req) {
                                                 console.log(err);
                                         });
                                     }, function() {
-                                        mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: false } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                        mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: { $ne: true } } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
                                             var zs = rows.map(r => String(r._id));
                                             async.forEachOf(zs, function(item, index, callback) {
                                                 var new_values = { $set: { z: index }};
@@ -1028,19 +1047,24 @@ ws.on('connection', function(socket, req) {
                         if (msg.arg.length === 1 && msg.arg[0].z !== undefined && msg.arg[0]._id && ObjectID.isValid(msg.arg[0]._id)) {
                             var o = msg.arg[0];
                             o.z = Math.floor(o.z);
-                            mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: false }, { _id: 1, z: 1, name: 1 }).sort({ z: 1 }).toArray(function(err, rows) {  
-                                var zs = rows.map(r => String(r._id));
-                                zs.move(zs.indexOf(String(o._id)), o.z);
-                                async.forEachOf(zs, function(item, index, callback) {
-                                    var new_values = { $set: { z: index }};
-                                    mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
-                                        if (err)
-                                            console.log(err);
-                                        callback();
+                            mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: { $ne: true } }, { _id: 1, z: 1, name: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                if (rows) {
+                                    var zs = rows.map(r => String(r._id));
+                                    zs.move(zs.indexOf(String(o._id)), o.z);
+                                    async.forEachOf(zs, function(item, index, callback) {
+                                        var new_values = { $set: { z: index }};
+                                        mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                            if (err)
+                                                console.log(err);
+                                            callback();
+                                        });
+                                    }, function(err) {
+                                        sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
                                     });
-                                }, function(err) {
-                                    sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
-                                });
+                                } else {
+                                    if (err)
+                                        console.log(err);
+                                }
                             });
                         // move objects (x/y axis)
                         } else {
@@ -1102,30 +1126,65 @@ app.get('/getroles', function (req, res) {
     }
     var sel = '<select class="tableselect">';
     mdb.collection('roles').find({ deleted: { $ne: true } }, { password: 0 }).toArray(function(err, rows) {
-        if (!err) {
+        if (rows) {
             for (var i = 0; i < rows.length; i++)
                 sel += '<option value="' + rows[i]._id + '">' + rows[i].name + '</option>';
             sel += '</select>';
             res.end(sel);
         } else {
             res.end(JSON.stringify('[]'));
-            console.log(err);
+            if (err)
+                console.log(err);
         }
     });
 });
 
 app.post('/api/alert', function(req, res) {
     msg = {};
-    mission = req.body.mission;
+    if (!req.body.mission_id || !ObjectID.isValid(req.body.mission_id) || !req.body.api || !req.body.channel || !req.body.text) {
+        res.end('ERR');
+        return;
+    }
     msg.user_id = 0;
     msg.analyst = '';
     msg.channel = req.body.channel;
     msg.text = xssFilters.inHTMLData(req.body.text);
     msg.timestamp = (new Date).getTime();
     mdb.collection('users').findOne({ api: req.body.api, deleted: { $ne: true } }, function(err, row) {
-        msg.user_id = row.id;
-        msg.username = rows.username;
+        if (row) {
+            msg.user_id = row._id;
+            msg.username = row.username;
 
+
+           mdb.collection('missions').aggregate([
+                {
+                    $match: { _id: ObjectID(req.body.mission_id), 'mission_users.user_id': ObjectID(msg.user_id), deleted: { $ne: true } }
+                },{
+                    $unwind: '$mission_users'
+                },{
+                    $match: { 'mission_users.user_id': ObjectID(msg.user_id) }
+                },{
+                    $project: {
+                        permissions: '$mission_users.permissions',
+                    }
+                }
+            ]).toArray(function(err, row) { 
+                if (row) {
+                    if( hasPermission(row[0].permissions, 'api_access')) {
+                        sendToRoom(req.body.mission_id, JSON.stringify({act:'chat', arg:{messages:[msg]}}));
+                        res.end('OK');
+                    }
+                } else {
+                     if (err)
+                        console.log(err);
+                    res.end('ERR');
+                }
+            });
+        } else {
+            if (err)
+                console.log(err);
+            res.end('ERR');
+        }
     });
 });
 
@@ -1159,11 +1218,12 @@ app.post('/api/:table', function (req, res) {
                     }
                 }
             ]).toArray(function(err, rows) {
-                if (!err) {
+                if (rows) {
                     res.end(JSON.stringify(rows))
                 } else {
                     res.end(JSON.stringify('[]'));
-                    console.log(err);
+                    if (err)
+                        console.log(err);
                 }
             });
 
@@ -1200,7 +1260,7 @@ app.post('/api/:table', function (req, res) {
 
         // delete mission
         } else if (req.body.oper === 'del' && hasPermission(req.session.cop_permissions, 'delete_missions') && req.body._id !== undefined) {
-            mdb.collection('missions').updateOne({ _id: ObjectID(req.body._id) }, { deleted: true }, function (err, result) {
+            mdb.collection('missions').updateOne({ _id: ObjectID(req.body._id) }, { $set: { deleted: true } }, function (err, result) {
                 if (!err) {
                     res.end(JSON.stringify('OK'));
                     //TODO: Also delete objects when they are mongo'ed
@@ -1219,11 +1279,12 @@ app.post('/api/:table', function (req, res) {
         // get users
         if (req.body.oper === undefined) {
             mdb.collection('users').find({ deleted: { $ne: true }}, { password: 0 }).toArray(function(err, rows) {
-                if (!err) {
+                if (rows) {
                     res.end(JSON.stringify(rows))
                 } else {
                     res.end(JSON.stringify('[]'));
-                    console.log(err);
+                    if (err)
+                        console.log(err);
                 }
             });
 
@@ -1271,20 +1332,23 @@ app.post('/api/:table', function (req, res) {
         // add user
         } else if (req.body.oper !== undefined && req.body.oper === 'add' && req.body.username && req.body.name !== undefined) {
             bcrypt.hash(req.body.password, null, null, function(err, hash) {
-                if (req.body.role === undefined || req.body.role === '')
-                    req.body.role = null;
-                if (req.body.permissions === undefined || req.body.permissions === '')
-                    req.body.permissions = null;
-                var api = crypto.randomBytes(32).toString('hex');
-                var user = { username: req.body.username, name: req.body.name, password: hash, permissions: req.body.permissions, api: api, avatar: '', deleted: false };
-                mdb.collection('users').insertOne(user, function (err, result) {
-                    if (!err) {
-                        res.end(JSON.stringify('OK'));
-                    } else {
-                        console.log(err);
-                        res.end(JSON.stringify('ERR13'));
-                    }
-                });
+                if (!err) {
+                    if (req.body.role === undefined || req.body.role === '')
+                        req.body.role = null;
+                    if (req.body.permissions === undefined || req.body.permissions === '')
+                        req.body.permissions = null;
+                    var api = crypto.randomBytes(32).toString('hex');
+                    var user = { username: req.body.username, name: req.body.name, password: hash, permissions: req.body.permissions, api: api, avatar: '', deleted: false };
+                    mdb.collection('users').insertOne(user, function (err, result) {
+                        if (!err) {
+                            res.end(JSON.stringify('OK'));
+                        } else {
+                            console.log(err);
+                            res.end(JSON.stringify('ERR13'));
+                        }
+                    });
+                } else
+                    console.log(err);
             });
 
         // delete user
@@ -1292,7 +1356,7 @@ app.post('/api/:table', function (req, res) {
             if (req.body.name === 'admin') // don't delete admin
                 res.end(JSON.stringify('ERR12'));
             else {
-                mdb.collection('users').updateOne({ _id: ObjectID(req.body._id) }, { deleted: true }, function (err, result) {
+                mdb.collection('users').updateOne({ _id: ObjectID(req.body._id) }, { $set: { deleted: true } }, function (err, result) {
                     if (!err) {
                         res.end(JSON.stringify('OK'));
                     } else {
@@ -1328,11 +1392,12 @@ app.post('/api/:table', function (req, res) {
                     }
                 }
             ]).toArray(function(err, rows) {
-                if (!err) {
+                if (rows) {
                     res.end(JSON.stringify(rows))
                 } else {
                     res.end(JSON.stringify('[]'));
-                    console.log(err);
+                    if (err)
+                        console.log(err);
                 }
             });
 
@@ -1366,7 +1431,7 @@ app.post('/api/:table', function (req, res) {
 
         // delete role
         } else if (req.body.oper !== undefined && req.body.oper === 'del' && req.body._id !== undefined) {
-            mdb.collection('roles').updateOne({ _id: ObjectID(req.body._id) }, { deleted: true }, function (err, result) {
+            mdb.collection('roles').updateOne({ _id: ObjectID(req.body._id) }, { $set: { deleted: true } }, function (err, result) {
                 if (!err) {
                     res.end(JSON.stringify('OK'));
                 } else {
@@ -1420,34 +1485,31 @@ app.get('/cop', function (req, res) {
     var mission_role = null;
     var mission_permissions = null;
     if (req.session.loggedin) {
-        if (req.query.mission !== undefined && req.query.mission) {
-            fs.readdir('./public/images/icons', function(err, icons) {
-                fs.readdir('./public/images/shapes', function(err, shapes) {
-                    fs.readdir('./public/images/links', function(err, links) {
-                        mdb.collection('missions').findOne({ _id: ObjectID(req.query.mission), deleted: { $ne: true }}, { password: 0 }, function(err, row) {
-                            if (!err) {
+        if (req.query.mission !== undefined && req.query.mission && ObjectID.isValid(req.query.mission)) {
+            mdb.collection('missions').findOne({ _id: ObjectID(req.query.mission), deleted: { $ne: true } }, function(err, row) {
+                console.log(row);
+                if (row) {
+                    fs.readdir('./public/images/icons', function(err, icons) {
+                        fs.readdir('./public/images/shapes', function(err, shapes) {
+                            fs.readdir('./public/images/links', function(err, links) {
                                 var mission_name = row.name;
-                            //    connection.query('SELECT role, permissions FROM mission_users_rel WHERE user_id = ? AND mission = ?', [req.session.user_id, req.query.mission], function (err, rows, fields) {
-                              //      if (!err && rows.length > 0) {
-                                //        mission_role = rows[0].role;
-                                  //      mission_permissions = rows[0].permissions;
-//                                    }
-                                   // if (req.session.username === 'admin')
-                                        mission_permissions = 'all'; //admin has all permissions
-                                    req.session.mission_role[req.query.mission] = mission_role;
-                                    req.session.mission_permissions[req.query.mission] = mission_permissions;
-                                    if (req.session.username === 'admin' || (mission_permissions && mission_permissions !== '')) // always let admin in
-                                        res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, username: req.session.username, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
-                                    else
-                                        res.redirect('login');
-                                //});
-                            } else {
-                                console.log(err);
-                                res.redirect('login');
-                            }
+                                //if (req.session.username === 'admin')
+                                    mission_permissions = 'all'; //admin has all permissions
+                                req.session.mission_role[req.query.mission] = mission_role;
+                                req.session.mission_permissions[req.query.mission] = mission_permissions;
+                                if (req.session.username === 'admin' || (mission_permissions && mission_permissions !== '')) // always let admin in
+                                    res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, username: req.session.username, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
+                                else
+                                    res.redirect('login');
+                            });
                         });
                     });
-                });
+                } else {
+                    res.redirect('login');
+                    if(err)
+                        console.log(err);
+                }
+
             });
         } else {
             res.redirect('../');
@@ -1460,7 +1522,7 @@ app.get('/cop', function (req, res) {
 app.post('/login', function (req, res) {
     if (req.body.username !== undefined && req.body.username !== '' && req.body.password !== undefined && req.body.password !== '') {
         mdb.collection('users').findOne({ username: { $eq: req.body.username }}, function(err, row) {
-            if (!err && row) {
+            if (row) {
                 bcrypt.compare(req.body.password, row.password, function(err, bres) {
                     if (bres) {
                         req.session.user_id = row._id;
@@ -1485,7 +1547,8 @@ app.post('/login', function (req, res) {
                         res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
                 });
             } else {
-                console.log(err);
+                if (err)
+                    console.log(err);
                 res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
             }
         });

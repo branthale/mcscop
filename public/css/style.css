@@ -626,12 +626,6 @@ button.pane-close {
     color: white;
 }
 
-/*input[type="text"] {
-    margin-bottom: -1px;
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-}*/
-
 .cp-form-control {
     width: 300px;
 }

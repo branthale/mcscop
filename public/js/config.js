@@ -275,8 +275,9 @@ $(document).ready(function() {
                 },
                 { label: 'Username', name: 'username', width: 50, editable: users_rw, edittype: 'text' },
                 { label: 'Name', name: 'name', width: 50, editable: users_rw, edittype: 'text' },
+                { label: 'API Key', name: 'api', width: 85, editable: users_rw, edittype: 'text' },
                 { label: 'Set Password', name: 'password', width: 50, editable: users_rw, edittype: 'password' },
-                { label: 'System Permissions', name: 'permissions', width: 200, editable: users_rw, edittype: 'select', formatter: 'select', editoptions: {
+                { label: 'System Permissions', name: 'permissions', width: 150, editable: users_rw, edittype: 'select', formatter: 'select', editoptions: {
                         value: {none: 'None', all:'All', manage_missions:'Manage Missions', delete_missions: 'Delete Missions', manage_users:'Manage Users', manage_roles:'Manage Roles'},
                         multiple: true,
                         size: 10
