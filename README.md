@@ -1,26 +1,25 @@
 # MCSCOP
 
 ## About MCSCOP
+MCSCOP is a node.js based web application that allows a team to create a "Common Operating Picture" during a network intrusion event.  The tool allows real-time collaborative network diagraming, event tracking, and operator note-taking.  Additionally the tool allows file sharing and chat to facilitate operator interaction and callaboration.
 
-## Getting Started with Ubuntu / Debian
+## Installation
+### Installing on Centos 7
 ```bash
 git clone https://github.com/psmitty7373/mcscop.git
 cd mcscop/
 ./install-cop.sh
-node app.js
 ```
+The install script will walk through getting any dependencies and creating an initial admin user and password.  The install script will also install PM2 run MCSCOP as a service.  Once completed MCSCOP will listen on port 3000 and can be accessed via a web browser  at http://<centos ip>:3000.
+ 
+## Features
 
-Open up your browser to http://mcscop-ip:3000
-The default MCSCOP credentials are admin / password.
+### Collaborative Diagramming
 
-## Getting Started with Docker
+### Event Tracking and Assignment
 
-```bash
-git clone https://github.com/psmitty7373/mcscop.git
-cd mcscop/
-docker build -t mcscop .
-docker run --name mcscop --rm -p 3000:3000 mcscop
-```
+### Operator Action Note-taking (OPNotes)
 
-This maps the container's 3000/tcp with your 0.0.0.0:3000/tcp. Open up your browser to http://localhost:3000.
-The default MCSCOP credentials are admin / password.
+### General Notes
+
+### File Sharing
