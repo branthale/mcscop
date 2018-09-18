@@ -3037,7 +3037,6 @@ $(document).ready(function() {
         viewrecords: false,
         toolbar: [true, "top"],
         subGridRowExpanded: function(subgridId, rowid) {
-            rowid = rowid.split('_')[1];
             var subgridTableId = subgridId + "_t";
             $("#" + subgridId).html("<table id='" + subgridTableId + "'></table>");
             $("#" + subgridTableId).jqGrid({
