@@ -4,29 +4,31 @@ const url = 'www.ironrain.org'
 // enable content security policy (this requires url to be set!)
 const cspEnabled = false;
 
+const Ajv = require('ajv');
+const validators = require('./validators.js');
 const express = require('express');
-const fs = require('fs');
 const app = express();
-const multer = require('multer');
-const ShareDB = require('sharedb');
-const richText = require('rich-text');
-const WebSocketJSONStream = require('websocket-json-stream');
-const http = require('http').Server(app);
-const session = require('express-session');
-const xssFilters = require('xss-filters');
-const cookieParser = require('cookie-parser');
+const async = require('async');
 const bcrypt = require('bcrypt-nodejs');
 const bodyParser = require('body-parser');
-const wss = require('ws');
-const async = require('async');
-const path = require('path');
+const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
+const fs = require('fs');
+const http = require('http').Server(app);
+const session = require('express-session');
 const MongoClient = require('mongodb').MongoClient;
 const MongoStore = require('connect-mongo')(session);
+const multer = require('multer');
 const ObjectID = require('mongodb').ObjectID;
+const path = require('path');
+const ShareDB = require('sharedb');
+const richText = require('rich-text');
 const rooms = new Map();
-const ws = new wss.Server({server:http});
 const upload = multer({dest: './temp_uploads'});
+const WebSocketJSONStream = require('websocket-json-stream');
+const xssFilters = require('xss-filters');
+const wss = require('ws');
+const ws = new wss.Server({server:http});
 
 const cop_permissions = ['all', 'manage_missions', 'delete_missions', 'manage_users', 'manage_roles'];
 const mission_permissions = ['all', 'manage_users', 'modify_diagram', 'create_events', 'delete_events', 'modify_notes', 'create_opnotes', 'delete_opnotes', 'modify_files', 'api_access'];
@@ -56,16 +58,34 @@ if (cspEnabled) {
     });
 }
 
-var mdb;
+// setup ajv json validation
+const ajv = new Ajv();
 
-MongoClient.connect('mongodb://localhost/mcscop', function(err, database) {
+// connect to mongo
+var mdb;
+MongoClient.connect('mongodb://localhost/mcscop', {
+        reconnectTries: Number.MAX_VALUE,
+        autoReconnect: true,
+        wtimeout: 5000 
+    }, function(err, database) {
     if (err) throw err;
+    database.on('close', function() {
+        console.log('Connection to database closed. Error?');
+        ws.clients.forEach(function each(socket) {
+            socket.close();
+        });
+    });
     mdb = database;
 });
 
 const sdb = require('sharedb-mongo')('mongodb://localhost:27017/mcscop');
 ShareDB.types.register(richText.type);
 const backend = new ShareDB({sdb: sdb, disableDocAction: true, disableSpaceDelimitedActions: true});
+
+backend.use('receive', function(r,c) {
+//    console.log(r);
+    c();
+});
 
 Array.prototype.move = function (old_index, new_index) {
     if (new_index >= this.length) {
@@ -77,6 +97,18 @@ Array.prototype.move = function (old_index, new_index) {
     this.splice(new_index, 0, this.splice(old_index, 1)[0]);
     return this;
 };
+
+function dynamicSort(property) {
+    var sortOrder = 1;
+    if(property[0] === "-") {
+        sortOrder = -1;
+        property = property.substr(1);
+    }
+    return function (a,b) {
+        var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
+        return result * sortOrder;
+    }
+}
 
 function sendToRoom(room, msg, selfSocket, roleFilter) {
     if (!selfSocket)
@@ -95,14 +127,14 @@ function sendToRoom(room, msg, selfSocket, roleFilter) {
 }
 
 function hasPermission(permissions, permission) {
-    if (permissions !== undefined && (permissions.split(',').indexOf(permission) > -1 || permissions.split(',').indexOf('all') > -1))
+    if (permissions && (permissions.indexOf(permission) > -1 || permissions.indexOf('all') > -1))
         return true;
     return false;
 }
 
-function getDir(dir, mission, cb) {
+function getDir(dir, mission_id, cb) {
     var resp = new Array();
-    if (dir === path.join(__dirname + '/mission-files/mission-' + mission)) {
+    if (dir === path.join(__dirname + '/mission-files/mission-' + mission_id)) {
         fs.stat(dir, function (err, s) {
             if (err == null) {
             } else if (err.code == 'ENOENT') {
@@ -139,9 +171,9 @@ function getDir(dir, mission, cb) {
             list.sort(function(a, b) {
                 return a.toLowerCase() < b.toLowerCase() ? -1 : 1;
             }).forEach(function(file, key) {
-                children.push(processNode(dir, mission, file));
+                children.push(processNode(dir, mission_id, file));
             });
-            if (dir === path.join(__dirname + '/mission-files/mission-' + mission)) {
+            if (dir === path.join(__dirname + '/mission-files/mission-' + mission_id)) {
                 resp[0].children = children;
                 cb(resp);
             } else
@@ -152,10 +184,10 @@ function getDir(dir, mission, cb) {
     });
 }
 
-function processNode(dir, mission, f) {
+function processNode(dir, mission_id, f) {
     var s = fs.statSync(path.join(dir, f));
     var base = path.join(dir, f);
-    var rel = path.relative(path.join(__dirname, '/mission-files/mission-' + mission), base);
+    var rel = path.relative(path.join(__dirname, '/mission-files/mission-' + mission_id), base);
     return {
         "id": rel,
         "text": f,
@@ -180,11 +212,11 @@ function insertLogEvent(socket, message, channel) {
     if (!channel || channel === '')
         channel = 'log';
     var timestamp = (new Date).getTime();
-    var log = { mission_id: ObjectID(socket.mission), user_id: ObjectID(socket.user_id), channel: channel, text: message, timestamp: timestamp, deleted: false };
+    var log = { mission_id: ObjectID(socket.mission_id), user_id: ObjectID(socket.user_id), channel: channel, text: message, timestamp: timestamp, deleted: false };
     mdb.collection('chats').insertOne(log, function (err, result) {
         if (!err) {
             log.username = socket.username;
-            sendToRoom(socket.room, JSON.stringify({ act: 'chat', arg: { messages: [ log ] } }));
+            sendToRoom(socket.room, JSON.stringify({ act: 'chat', arg: [ log ] }));
         } else
             console.log(err);
     });
@@ -193,11 +225,11 @@ function insertLogEvent(socket, message, channel) {
 ws.on('connection', function(socket, req) {
     socket.loggedin = false;
     socket.session = '';
-    socket.mission = 0;
+    socket.mission_id = 0;
     var s = req.headers.cookie.split('session=s%3A')[1].split('.')[0];
     if (s) {
         socket.session = s;
-        mdb.collection('sessions').findOne({ _id: session }, function(err, row) {
+        mdb.collection('sessions').findOne({ _id: s }, function(err, row) {
             if (row) {
                 try {
                     var data = JSON.parse(row.session);
@@ -209,6 +241,7 @@ ws.on('connection', function(socket, req) {
                     socket.mission_permissions = data.mission_permissions;
                     socket.mission_role = data.mission_role;
                     socket.sub_roles = data.sub_roles;
+                    setupSocket(socket);
                 } catch (e) {
                     console.log(e);
                 }
@@ -216,16 +249,241 @@ ws.on('connection', function(socket, req) {
                 console.log(err);
         });
     }
-    socket.on('message', function(msg, flags) {
+    socket.isAlive = true;
+});
+
+// make sure sockets are still alive
+const pingInterval = setInterval(function ping() {
+    ws.clients.forEach(function each(socket) {
+        if (socket.isAlive === false)
+            return socket.terminate();
+        socket.isAlive = false;
+        socket.ping(function() {});
+    });
+}, 30000);
+
+async function getObjects(socket) {
+    try {
+        res = await mdb.collection('objects').find({ mission_id: ObjectID(socket.mission_id), deleted: { $ne: true } }).sort({ z: 1 }).toArray();
+        return res;
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+
+async function getRoles(socket) {
+    try {
+        return await mdb.collection('roles').find({ deleted: { $ne: true }}).toArray();
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function getUsers(socket) {
+    try {
+        return await mdb.collection('users').find({ deleted: { $ne: true } }, { username: 1 }).toArray();
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function getNotes(socket) {
+    try {
+        var resp = new Array();
+        var rows = await mdb.collection('notes').find({ $and: [ { mission_id: ObjectID(socket.mission_id) }, { deleted: { $ne: true } } ] }).sort({ name : 1 }).toArray();
+        for (var i = 0; i < rows.length; i++) {
+            resp.push({
+                "id": rows[i]._id,
+                "text": rows[i].name,
+                "icon" : 'jstree-custom-file',
+                "state": {
+                    "opened": false,
+                    "disabled": false,
+                    "selected": false
+                },
+                "li_attr": {
+                    "base": '#',
+                    "isLeaf": true
+                },
+                "children": false
+            });
+        }
+        return resp;
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function getUserSettings(socket) {
+    try {
+        return await mdb.collection('missions').aggregate([
+            {
+                $match: { _id: ObjectID(socket.mission_id), deleted: { $ne: true } }
+            },{
+                $unwind: '$mission_users'
+            },{
+                $lookup: {
+                    from: 'users',
+                    localField: 'mission_users.user_id',
+                    foreignField: '_id',
+                    as: 'user'
+                }
+            },{
+                $project: {
+                    _id: '$mission_users._id',
+                    user_id: '$mission_users.user_id',
+                    username: '$user.username',
+                    permissions: '$mission_users.permissions',
+                    role: '$mission_users.role'
+                }
+            }
+        ]).toArray();
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function getEvents(socket) {
+    try {
+        return await mdb.collection('events').aggregate([
+            {
+                $match: { mission_id: ObjectID(socket.mission_id), deleted: { $ne: true }}
+            },{
+                $sort: { event_time: 1 }
+            },{
+                $lookup: {
+                    from: 'users',
+                    localField: 'user_id',
+                    foreignField: '_id',
+                    as: 'username'
+                }
+            },{
+                $project: {
+                    _id: 1,
+                    mission_id: 1,
+                    event_time: 1,
+                    discovery_time: 1,
+                    event_type: 1,
+                    source_object: 1,
+                    dest_object: 1,
+                    source_port: 1,
+                    dest_port: 1,
+                    short_desc: 1,
+                    assignment: 1,
+                    user_id: 1,
+                    username: '$username.username'
+                }
+            }
+        ]).toArray();
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function getOpnotes(socket) {
+    try {
+        return await mdb.collection('opnotes').aggregate([
+            {
+                $match: { mission_id: ObjectID(socket.mission_id), deleted: { $ne: true }}
+            },{
+                $sort: { event_time: 1 }
+            },{
+                $lookup: {
+                    from: 'users',
+                    localField: 'user_id',
+                    foreignField: '_id',
+                    as: 'username'
+                },
+            },{
+                $project: {
+                    _id: 1,
+                    event_id: 1,
+                    mission_id: 1,
+                    evt: 1,
+                    event_time: 1,
+                    source_object: 1,
+                    tool: 1,
+                    action: 1,
+                    user_id: 1,
+                    username: '$username.username'
+                }
+            }
+        ]).toArray();
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function getChats(socket) {
+    try {
+        var res = [];
+        var channels = await mdb.collection('chats').distinct('channel');
+        for (var i = 0; i < channels.length; i++) {
+            var rows = await mdb.collection('chats').aggregate([
+                {
+                    $match: { mission_id: ObjectID(socket.mission_id), channel: channels[i], deleted: { $ne: true } }
+                },{
+                    $sort: { timestamp: -1 }
+                },{
+                    $limit: 50
+                },{
+                    $sort: { timestamp: 1 }
+                },{
+                    $lookup: {
+                        from: 'users',
+                        localField: 'user_id',
+                        foreignField: '_id',
+                        as: 'username'
+                    }
+                },{
+                    $project: {
+                        _id: 1,
+                        user_id: 1,
+                        channel: 1,
+                        text: 1,
+                        timestamp: 1,
+                        username: '$username.username'
+                    }
+                }]).toArray();
+            if (rows) {
+                if (rows.length == 50) {
+                    rows[0].more = 1;
+                }
+                res = res.concat(rows);
+            }
+        }
+        return res;
+    } catch (err) {
+        console.log(err);
+        return [];
+    }
+}
+
+async function setupSocket(socket) {
+    if (!socket.loggedin) {
+        socket.close();
+        return;
+    }
+
+    socket.on('pong', function () {
+        socket.isAlive = true;
+    });
+
+    socket.on('message', async function(msg, flags) {
         try {
             msg = JSON.parse(msg);
         } catch (e) {
             return;
         }
-
-        console.log(msg, socket.type);
-        
-        if (msg.act && ((msg.act === 'stream' || msg.act === 'join') || (socket.mission && ObjectID.isValid(socket.mission) && socket.user_id && ObjectID.isValid(socket.user_id))) && socket.loggedin) {
+        if (msg.act && ((msg.act === 'stream' || msg.act === 'join') || (socket.mission_id && ObjectID.isValid(socket.mission_id) && socket.user_id && ObjectID.isValid(socket.user_id))) && socket.loggedin) {
             switch (msg.act) {
                 case 'stream':
                     var stream = new WebSocketJSONStream(socket);
@@ -234,29 +492,45 @@ ws.on('connection', function(socket, req) {
                     break;
 
                 case 'join':
-                    socket.room = msg.arg.mission;
-                    socket.mission = msg.arg.mission;
-                    if (!rooms.get(msg.arg.mission))
-                        rooms.set(msg.arg.mission, new Set());
-                    rooms.get(msg.arg.mission).add(socket);
+                    //TODO permissions
+                    socket.room = msg.arg.mission_id;
+                    socket.mission_id = msg.arg.mission_id;
+                    if (!rooms.get(msg.arg.mission_id))
+                        rooms.set(msg.arg.mission_id, new Set());
+                    rooms.get(msg.arg.mission_id).add(socket);
                     socket.type = 'diagram';
+
+                    var resp = {};
+
+                    resp.users = await getUsers(socket);
+                    resp.roles = await getRoles(socket);
+                    resp.objects = await getObjects(socket);
+                    resp.events = await getEvents(socket);
+                    resp.opnotes = await getOpnotes(socket);
+                    resp.userSettings = await getUserSettings(socket);
+                    resp.notes = await getNotes(socket);
+                    resp.chats = await getChats(socket);
+
+                    socket.send(JSON.stringify({ act:'join', arg: resp }));
+
                     break;
 
                 // ------------------------- CHATS -------------------------
                 case 'insert_chat':
-                    msg.arg.username = socket.username;
-                    msg.arg.user_id = socket.user_id;
-                    msg.arg.text = xssFilters.inHTMLData(msg.arg.text);
-                    msg.arg.timestamp = (new Date).getTime();
+                    if (ajv.validate(validators.insert_chat, msg.arg)) {
+                        msg.arg.username = socket.username;
+                        msg.arg.user_id = socket.user_id;
+                        msg.arg.text = xssFilters.inHTMLData(msg.arg.text);
+                        msg.arg.timestamp = (new Date).getTime();
 
-                    var chat = { mission_id: ObjectID(socket.mission), user_id: ObjectID(socket.user_id), channel: msg.arg.channel, text: msg.arg.text, timestamp: msg.arg.timestamp, deleted: false };
-                    mdb.collection('chats').insertOne(chat, function (err, result) {
-                        if (!err) {
-                            sendToRoom(socket.room, JSON.stringify({act:'chat', arg:{messages:[msg.arg]}}));
-                        } else
-                            console.log(err);
-                    });
-        
+                        var chat = { mission_id: ObjectID(socket.mission_id), user_id: ObjectID(socket.user_id), channel: msg.arg.channel, text: msg.arg.text, timestamp: msg.arg.timestamp, deleted: false };
+                        mdb.collection('chats').insertOne(chat, function (err, result) {
+                            if (!err) {
+                                sendToRoom(socket.room, JSON.stringify({ act:'chat', arg: [msg.arg] }));
+                            } else
+                                console.log(err);
+                        });
+                    }
                     break;
 
                 case 'get_old_chats':
@@ -265,7 +539,7 @@ ws.on('connection', function(socket, req) {
 
                     mdb.collection('chats').aggregate([
                         {
-                            $match: { mission_id: ObjectID(socket.mission), channel: msg.arg.channel, timestamp: { $lt: parseInt(msg.arg.start_from) }, deleted: { $ne: true } }
+                            $match: { mission_id: ObjectID(socket.mission_id), channel: msg.arg.channel, timestamp: { $lt: parseInt(msg.arg.start_from) }, deleted: { $ne: true } }
                         },{
                             $sort: { timestamp: -1 }
                         },{
@@ -294,249 +568,109 @@ ws.on('connection', function(socket, req) {
                                     rows[49].more = 1;
                                 else
                                     rows[0].more = 1;
-                            socket.send(JSON.stringify({act:'bulk_chat', arg:{messages:rows}}));
+                            socket.send(JSON.stringify({ act:'bulk_chat', arg: rows }));
                         } else {
-                            socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
+                            socket.send(JSON.stringify({ act: 'bulk_chat', arg: [] }));
                             if (err)
                                 console.log(err);
                         }
                     });
                     break;
 
-                case 'get_all_chats':
-                    var res = [];
-                    mdb.collection('chats').distinct('channel', function(err, channels) {
-                        if (channels) {
-                            async.each(channels, function(channel, callback) {
-                                mdb.collection('chats').aggregate([
-                                    {
-                                        $match: { mission_id: ObjectID(socket.mission), channel: channel, deleted: { $ne: true } }
-                                    },{
-                                        $sort: { timestamp: -1 }
-                                    },{
-                                        $limit: 50
-                                    },{
-                                        $sort: { timestamp: 1 }
-                                    },{
-                                        $lookup: {
-                                            from: 'users',
-                                            localField: 'user_id',
-                                            foreignField: '_id',
-                                            as: 'username'
-                                        }
-                                    },{
-                                        $project: {
-                                            _id: 1,
-                                            user_id: 1,
-                                            channel: 1,
-                                            text: 1,
-                                            timestamp: 1,
-                                            username: '$username.username'
-                                        }
-                                }]).toArray(function(err, rows) {
-                                    if (rows) {
-                                        if (rows.length == 50)
-                                            if (msg.arg.start_from !== undefined && !isNaN(msg.arg.start_from))
-                                                rows[49].more = 1;
-                                            else
-                                                rows[0].more = 1;
-                                        res = res.concat(rows);
-                                        callback();
-                                    } else {
-                                        socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
-                                        if (err)
-                                            console.log(err);
-                                    }
-                                });
-                            }, function(err) {
-                                if (!err)
-                                    socket.send(JSON.stringify({ act:'bulk_chat', arg:{ messages:res } }));
-                            });
-                        } else {
-                                socket.send(JSON.stringify({ act: 'bulk_chat', arg: { messages: '[]' } }));
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
+               case 'insert_user_setting':
+                    var user = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'manage_users') && ajv.validate(validators.insert_user_setting, user)) {
+                        var new_perms = [];
 
-                // ------------------------- ROLES -------------------------
-                case 'get_roles':
-                    mdb.collection('roles').find({ deleted: { $ne: true }}).toArray(function(err, rows) {
-                        if (rows) {
-                            socket.send(JSON.stringify({ act: 'all_roles', arg: rows }))
-                        } else {
-                            socket.send(JSON.stringify({ act: 'all_roles', arg: '[]' }));
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
-
-                // ------------------------- USERS -------------------------
-                case 'get_users':
-                    mdb.collection('users').find({ deleted: { $ne: true } }, { username: 1 }).toArray(function(err, rows) {
-                        if (rows) {
-                            socket.send(JSON.stringify({ act: 'all_users', arg: rows }))
-                        } else {
-                            socket.send(JSON.stringify({ act: 'all_users', arg: '[]' }));
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
-
-                case 'get_user_settings':
-                    mdb.collection('missions').aggregate([
-                        {
-                            $match: { _id: ObjectID(socket.mission), deleted: { $ne: true } }
-                        },{
-                            $unwind: '$mission_users'
-                        },{
-                            $lookup: {
-                                from: 'users',
-                                localField: 'mission_users.user_id',
-                                foreignField: '_id',
-                                as: 'user'
-                            }
-                        },{
-                            $project: {
-                                _id: '$mission_users._id',
-                                user_id: '$mission_users.user_id',
-                                username: '$user.username',
-                                permissions: '$mission_users.permissions',
-                                role: '$mission_users.role'
+                        if (user.permissions) {
+                            for (var i = 0; i < user.permissions.length; i++) {
+                                if (mission_permissions.indexOf(user.permissions[i]) > -1)
+                                    new_perms.push(user.permissions[i]);
                             }
                         }
-                    ]).toArray(function(err, rows) {
-                        if (rows) {
-                            socket.send(JSON.stringify({ act: 'all_user_settings', arg: rows }));
-                        } else {
-                            socket.send(JSON.stringify({ act: 'all_user_settings', arg: '[]' }));
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
-                case 'insert_user_setting':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'manage_users')) {
-                        var user = msg.arg;
 
-                        if (!user.user_id)
-                            break;
-
-                        user.permissions = xssFilters.inHTMLData(user.permissions);
-                        user.username = xssFilters.inHTMLData(user.username);
-                        user.role = xssFilters.inHTMLData(user.role);
-
-                        if (user.permissions === '')
-                            user.permissions = null
-
-                        var new_values = { $push: { mission_users: { _id: ObjectID(null), user_id: ObjectID(user.user_id), permissions: user.permissions, role: null } } };
+                        var new_values = { $push: { mission_users: { _id: ObjectID(null), user_id: ObjectID(user.user_id), permissions: new_perms, role: null } } };
                         
                         if (user.role && ObjectID.isValid(user.role))
                             new_values.$push.mission_users.role = ObjectID(user.role);
 
-                        mdb.collection('missions').count({ _id: ObjectID(socket.mission), 'mission_users.user_id': ObjectID(user.user_id) }, function(err, count) {
-                            // don't let the user make the same user setting over again
-                            if (count === 0) {
-                                mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission) }, new_values, function (err, result) {
-                                    if (!err) {
-                                        socket.send(JSON.stringify({act: 'insert_user_setting', arg: user}));
-                                        insertLogEvent(socket, 'Inserted user setting ID: ' + user.user_id + '.');
-                                    } else
-                                        console.log(err);
-                                });
-                            }
+                        mdb.collection('missions').count({ _id: ObjectID(socket.mission_id), 'mission_users.user_id': ObjectID(user.user_id) }, function(err, count) {
+                            if (!err) {
+                                // don't let the user make the same user setting over again
+                                if (count === 0) {
+                                    mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission_id) }, new_values, function (err, result) {
+                                        if (!err) {
+                                            socket.send(JSON.stringify({act: 'insert_user_setting', arg: user}));
+                                            insertLogEvent(socket, 'Inserted user setting ID: ' + user.user_id + '.');
+                                        } else
+                                            console.log(err);
+                                    });
+                                }
+                            } else
+                                console.log(err);
                         });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
 
                 case 'update_user_setting':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'manage_users')) {
-                        var user = msg.arg;
-
-                        if (!ObjectID.isValid(user.user_id))
-                            break;
+                    var user = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'manage_users') && ajv.validate(validators.update_user_setting, user)) {
+                        var new_perms = [];
 
                         user.permissions = xssFilters.inHTMLData(user.permissions);
-                        user.username = xssFilters.inHTMLData(user.username);
 
-                        if (user.permissions === '')
-                            user.permissions = null
+                        if (user.permissions) {
+                            user.permissions = user.permissions.split(',');
+                            for (var i = 0; i < user.permissions.length; i++) {
+                                if (mission_permissions.indexOf(user.permissions[i]) > -1)
+                                    new_perms.push(user.permissions[i]);
+                            }
+                        }
 
-                        var new_values = { $set: { 'mission_users.$.permissions': user.permissions, 'mission_users.$.role': null }  };
+                        var new_values = { $set: { 'mission_users.$.permissions': new_perms, 'mission_users.$.role': null }  };
+
+                        console.log(new_values);
 
                         if (user.role && ObjectID.isValid(user.role))
                             new_values.$set['mission_users.$.role'] = ObjectID(user.role);
 
-                        mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission), 'mission_users.user_id': ObjectID(user.user_id) }, new_values, function (err, result) {
+                        mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission_id), 'mission_users.user_id': ObjectID(user.user_id) }, new_values, function (err, result) {
                             if (!err) {
                                 socket.send(JSON.stringify({act: 'update_user_setting', arg: user}));
                                 insertLogEvent(socket, 'Modified user setting ID: ' + user.user_id + '.');
                             } else
                                 console.log(err);
                         });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
 
                 case 'delete_user_setting':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'manage_users')) {
-                        var user = msg.arg;
+                    var user = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'manage_users') && user._id && ObjectID.isValid(user._id)) {
 
-                        if (!ObjectID.isValid(user._id))
-                            break;
-
-                        mdb.collection('missions').findOneAndUpdate({ _id: ObjectID(socket.mission) }, { $pull: { mission_users: { _id: ObjectID(user._id) } } }, function (err, result) {
+                        mdb.collection('missions').findOneAndUpdate({ _id: ObjectID(socket.mission_id) }, { $pull: { mission_users: { _id: ObjectID(user._id) } } }, function (err, result) {
                             if (!err) {
                                 sendToRoom(socket.room, JSON.stringify({act: 'delete_user_setting', arg: user}));
                                 insertLogEvent(socket, 'Deleted user setting ID: ' + user._id + '.');
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
+
                 // ------------------------- NOTES -------------------------
-                case 'get_notes':
-                    var args = [socket.mission];
-
-                    mdb.collection('notes').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: { $ne: true } } ] }).sort({ name : 1 }).toArray(function(err, rows) {
-                        if (rows) {
-                            var resp = new Array();
-                            for (var i = 0; i < rows.length; i++) {
-                                resp.push({
-                                    "id": rows[i]._id,
-                                    "text": rows[i].name,
-                                    "icon" : 'jstree-custom-file',
-                                    "state": {
-                                        "opened": false,
-                                        "disabled": false,
-                                        "selected": false
-                                    },
-                                    "li_attr": {
-                                        "base": '#',
-                                        "isLeaf": true
-                                    },
-                                    "children": false
-                                });
-                            }
-                            socket.send(JSON.stringify({act:'all_notes', arg:resp}));
-                        } else { 
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
-
-                case 'insert_note':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
-                        var e = msg.arg;
-
-                        if (!e.name)
-                            break;
+               case 'insert_note':
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'edit_notes') && ajv.validate(validators.insert_note, e)) {
 
                         e.name = xssFilters.inHTMLData(e.name);
-                        var note = { mission_id: ObjectID(socket.mission), name: e.name, deleted: false };
+                        var note = { mission_id: ObjectID(socket.mission_id), name: e.name, deleted: false };
+
                         mdb.collection('notes').insertOne(note, function (err, result) {
                             if (!err) {
                                 insertLogEvent(socket, 'Created note: ' + e.name + '.');
@@ -558,21 +692,20 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 case 'rename_note':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
-                        var e = msg.arg;
-
-                        if (!e.name || !ObjectID.isValid(e.id))
-                            break;
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'edit_notes') && ajv.validate(validators.rename_note, e)) {
 
                         e.name = xssFilters.inHTMLData(e.name);
                         var new_values = { $set: { name: e.name } };
+
                         mdb.collection('notes').updateOne({ _id: ObjectID(e.id) }, new_values, function (err, result) {
                             if (!err) {
-                                insertLogEvent(socket, 'Renamed note: ' + e.name + '.');
+                                insertLogEvent(socket, 'Renamed note: ' + e.id + ' to: ' + e.name + '.');
                                 sendToRoom(socket.room, JSON.stringify({act: 'rename_note', arg: {
                                     id: e.id,
                                     name: e.name
@@ -580,15 +713,13 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 case 'delete_note':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'edit_notes')) {
-                        var e = msg.arg;
-
-                        if (!e.id || !ObjectID.isValid(e.id))
-                            break;
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'edit_notes') && e.id && ObjectID.isValid(e.id)) {
 
                         mdb.collection('notes').updateOne({ _id: ObjectID(e.id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
@@ -597,68 +728,19 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 // ------------------------- EVENTS -------------------------
-                case 'get_events':
-                    mdb.collection('events').aggregate([
-                        {
-                            $match: { mission_id: ObjectID(socket.mission), deleted: { $ne: true }}
-                        },{
-                            $sort: { event_time: 1 }
-                        },{
-                            $lookup: {
-                                from: 'users',
-                                localField: 'user_id',
-                                foreignField: '_id',
-                                as: 'username'
-                            }
-                        },{
-                            $project: {
-                                _id: 1,
-                                mission_id: 1,
-                                event_time: 1,
-                                discovery_time: 1,
-                                event_type: 1,
-                                source_object: 1,
-                                dest_object: 1,
-                                source_port: 1,
-                                dest_port: 1,
-                                short_desc: 1,
-                                assignment: 1,
-                                user_id: 1,
-                                username: '$username.username'
-                            }
-                        }
-                    ]).toArray(function(err, rows) {
-                        if (rows) {
-                            socket.send(JSON.stringify({ act:'all_events', arg:rows }))
-                        } else {
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
-
-                case 'update_event':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_events')) {
-                        var e = msg.arg;
-
-                        if (!e._id || !ObjectID.isValid(e._id))
-                            break;
-
-                        if (!e.event_time || isNaN(e.event_time) || e.event_time === '')
-                            e.event_time = (new Date).getTime();
-                        if (!e.discovery_time || isNaN(e.discovery_time) || e.discovery_time === '')
-                            e.discovery_time = (new Date).getTime();
-                        if (!e.dest_port || isNaN(e.dest_port) || e.dest_port === '')
-                            e.dest_port = 0;
-                        if (!e.source_port || isNaN(e.source_port) || e.source_port === '')
-                            e.source_port = 0;
+               case 'update_event':
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_events') && ajv.validate(validators.update_event, e)) {
 
                         e.event_type = xssFilters.inHTMLData(e.event_type);
                         e.short_desc = xssFilters.inHTMLData(e.short_desc);
+                        e.source_port = xssFilters.inHTMLData(e.source_port);
+                        e.dest_port = xssFilters.inHTMLData(e.dest_port);
 
                         var new_values = { $set: { event_time: e.event_time, discovery_time: e.discovery_time, source_object: null, source_port: e.source_port, dest_object: null, dest_port: e.dest_port, event_type: e.event_type, short_desc: e.short_desc, assignment: null} };
 
@@ -676,27 +758,21 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 case 'insert_event':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'create_events')) {
-                        var e = msg.arg;
-                        if (!e.event_time || isNaN(e.event_time) || e.event_time === '')
-                            e.event_time = (new Date).getTime();
-                        if (!e.discovery_time || isNaN(e.discovery_time) || e.discovery_time === '')
-                            e.discovery_time = (new Date).getTime();
-                        if (!e.dest_port || isNaN(e.dest_port) || e.dest_port === '')
-                            e.dest_port = 0;
-                        if (!e.source_port || isNaN(e.source_port) || e.source_port === '')
-                            e.source_port = 0;
-
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'create_events') && ajv.validate(validators.insert_event, e)) {
                         e.event_type = xssFilters.inHTMLData(e.event_type);
                         e.short_desc = xssFilters.inHTMLData(e.short_desc);
+                        e.source_port = xssFilters.inHTMLData(e.source_port);
+                        e.dest_port = xssFilters.inHTMLData(e.dest_port);
                         e.user_id = socket.user_id;
                         e.username = socket.username;
 
-                        var evt = { mission_id: ObjectID(socket.mission), event_time: e.event_time, discovery_time: e.discovery_time, source_object: null, source_port: e.source_port, dest_object: null, dest_port: e.dest_port, event_type: e.event_type, short_desc: e.short_desc, user_id: ObjectID(socket.user_id), deleted: false };
+                        var evt = { mission_id: ObjectID(socket.mission_id), event_time: e.event_time, discovery_time: e.discovery_time, source_object: null, source_port: e.source_port, dest_object: null, dest_port: e.dest_port, event_type: e.event_type, short_desc: e.short_desc, user_id: ObjectID(socket.user_id), deleted: false };
 
                         if (e.source_object && ObjectID.isValid(e.source_object))
                             evt.source_object = ObjectID(e.source_object);
@@ -713,14 +789,14 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
 
                 case 'delete_event':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'delete_events')) {
-                        var e = msg.arg;
-                        if (!e._id || !ObjectID.isValid(e._id))
-                            break;
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'delete_events') && e._id && ObjectID.isValid(e._id)) {
 
                         mdb.collection('events').updateOne({ _id: ObjectID(e._id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
@@ -729,52 +805,14 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 // ------------------------- OPNOTES -------------------------
-                case 'get_opnotes':
-                    mdb.collection('opnotes').aggregate([
-                        {
-                            $match: { mission_id: ObjectID(socket.mission), deleted: { $ne: true }}
-                        },{
-                            $sort: { event_time: 1 }
-                        },{
-                            $lookup: {
-                                from: 'users',
-                                localField: 'user_id',
-                                foreignField: '_id',
-                                as: 'username'
-                            },
-                        },{
-                            $project: {
-                                _id: 1,
-                                mission_id: 1,
-                                evt: 1,
-                                event_time: 1,
-                                source_object: 1,
-                                tool: 1,
-                                action: 1,
-                                user_id: 1,
-                                username: '$username.username'
-                            }
-                        }
-                    ]).toArray(function(err, rows) {
-                        if (rows) {
-                            socket.send(JSON.stringify({ act:'all_opnotes', arg:rows }))
-                        } else {
-                            if (err)
-                                console.log(err);
-                        }
-                    });
-                    break;
-
-                case 'update_opnote':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'create_opnotes')) {
-                        var e = msg.arg;
-
-                        if (!e._id || !ObjectID.isValid(e._id))
-                            break;
+               case 'update_opnote':
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'create_opnotes') && ajv.validate(validators.update_opnote, e)) {
 
                         e.source_object = xssFilters.inHTMLData(e.source_object);
                         e.tool = xssFilters.inHTMLData(e.tool);
@@ -783,10 +821,7 @@ ws.on('connection', function(socket, req) {
                         var new_values = { $set: { event_time: e.event_time, event_id: null, source_object: e.source_object, tool: e.tool, action: e.action } };
 
                         if (e.event_id && ObjectID.isValid(e.event_id))
-                            new_values.event_id = ObjectID(e.event_id);
-
-                        if (!e.event_time || isNaN(e.event_time) || e.event_time === '')
-                            new_values.event_time = (new Date).getTime();
+                            new_values.$set.event_id = ObjectID(e.event_id);
 
                         mdb.collection('opnotes').updateOne({ _id: ObjectID(e._id) }, new_values, function (err, result) {
                             if (!err) {
@@ -796,30 +831,28 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
 
                 case 'insert_opnote':
-                    console.log('here');
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'create_opnotes')) {
-                        var e = msg.arg;
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'create_opnotes') && ajv.validate(validators.insert_opnote, e)) {
 
                         e.user_id = socket.user_id;
                         e.source_object = xssFilters.inHTMLData(e.source_object);
                         e.tool = xssFilters.inHTMLData(e.tool);
                         e.action = xssFilters.inHTMLData(e.action);
 
-                        var opnote = { mission_id: ObjectID(socket.mission), event_id: null, role: socket.mission_role[socket.mission], event_time: e.event_time, source_object: e.source_object, tool: e.tool, action: e.action, user_id: ObjectID(e.user_id), deleted: false };
+                        var opnote = { mission_id: ObjectID(socket.mission_id), event_id: null, role: socket.mission_role[socket.mission_id], event_time: e.event_time, source_object: e.source_object, tool: e.tool, action: e.action, user_id: ObjectID(e.user_id), deleted: false };
 
                         if (e.event_id && ObjectID.isValid(e.event_id))
                             e.event_id = ObjectID(e.event_id);
 
-                        if (!e.event_time || isNaN(e.event_time) || e.event === '')
-                            e.event_time = (new Date).getTime();
-
                         mdb.collection('opnotes').insertOne(opnote, function (err, result) {
                             if (!err) {
-                                e.id = opnote._id;
+                                e._id = opnote._id;
                                 e.user_id = socket.user_id;
                                 e.username = socket.username;
                                 insertLogEvent(socket, 'Created opnote: ' + e.action + ' ID: ' + e._id + '.');
@@ -827,15 +860,14 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
 
                 case 'delete_opnote':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'delete_opnotes')) {
-                        var e = msg.arg;
-                        if (!e._id || !ObjectID.isValid(e._id))
-                            break;
-
+                    var e = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'delete_opnotes') && e._id && ObjectID.isValid(e._id)) {
                         mdb.collection('opnotes').updateOne({ _id: ObjectID(e._id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
                                 insertLogEvent(socket, 'Deleted opnote ID: ' + e._id + '.');
@@ -843,193 +875,154 @@ ws.on('connection', function(socket, req) {
                             } else
                                 console.log(err);
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 // ------------------------- OBJECTS -------------------------
-                case 'get_objects':
-                    mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: { $ne: true } }).sort({ z: 1 }).toArray(function(err, rows) {
-                        if (rows) {
-                            socket.send(JSON.stringify({ act:'all_objects', arg:rows }))
-                        } else {
-                            socket.send(JSON.stringify('[]'));
+                case 'paste_object':
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_diagram')) {
+                        var args = [];
+                        async.eachOf(msg.arg, function(o, index, callback) {
+                            if (ajv.validate(validators.paste_object, o)) {
+                                mdb.collection('objects').findOne({ _id: ObjectID(o._id), type: { $ne: 'link' }, deleted: { $ne: true }}, function(err, row) {
+                                    if (row) {
+                                        row._id = ObjectID(null);
+                                        row.z = o.z;
+                                        row.x = o.x;
+                                        row.y = o.y;
+
+                                        mdb.collection('objects').insertOne(row, function (err, result) {
+                                            if (!err) {
+                                                insertLogEvent(socket, 'Created ' + row.type + ': ' + row.name + '.');
+                                                args.push(row);
+                                                callback();
+                                            } else
+                                                callback(err);
+                                        });
+                                    } else {
+                                        if (err)
+                                            callback(err);
+                                    }
+                                });
+                            }
+                        }, function (err) {
                             if (err)
                                 console.log(err);
-                        }
-                    });
-                    break;
-
-                case 'paste_object':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        var o = msg.arg;
-
-                        if (!o._id || !ObjectID.isValid(o._id))
-                            break;
-
-                        mdb.collection('objects').findOne({ _id: ObjectID(o._id), deleted: { $ne: true }}, function(err, row) {
-                            if  (row) {
-                                row._id = ObjectID(null);
-                                row.z = o.z;
-
-                                if (isNaN(parseFloat(o.x)) || !isFinite(o.x) || isNaN(parseFloat(o.y)) || !isFinite(o.y)) {
-                                    row.x += 20;
-                                    row.y += 20;
-                                } else {
-                                    row.x = o.x;
-                                    row.y = o.y;
-                                }
-
-                                mdb.collection('objects').insertOne(row, function (err, result) {
-                                    if (!err) {
-                                        insertLogEvent(socket, 'Created ' + row.type + ': ' + row.name + '.');
-                                        sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: row }));
-                                    } else
-                                        console.log(err);
-                                });
-                            } else {
-                                if (err)
-                                    console.log(err);
-                            }
+                            else
+                                sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: args }));
                         });
-                    }
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 case 'insert_object':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        var o = msg.arg;
-                        if (o.type === 'link' && (!o.obj_a || !o.obj_b || !ObjectID.isValid(o.obj_a) || !ObjectID.isValid(o.obj_b)))
-                            break;
-
-                        if (!o.image || o.image === '') {
-                            socket.send(JSON.stringify({act: 'error', arg: 'Error: Missing image!'}));
-                            break;
+                    var o = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_diagram') && ajv.validate(validators.insert_object, o)) {
+                        o.rot = 0;
+                        o.scale_x = 1;
+                        o.scale_y = 1;
+                        if (o.type === 'shape') {
+                            o.scale_x = 65;
+                            o.scale_y = 65;
                         }
-
-                        if (o.type === 'icon' || o.type === 'shape' || o.type === 'link') {
-                            if (isNaN(parseFloat(o.x)) || !isFinite(o.x) || isNaN(parseFloat(o.y)) || !isFinite(o.y)) {
-                                o.x = 33;
-                                o.y = 33;
-                            }
-                            o.rot = 0;
-                            o.scale_x = 1;
-                            o.scale_y = 1;
-                            if (o.type === 'shape') {
-                                o.scale_x = 65;
-                                o.scale_y = 65;
-                            }
-                            o.type = xssFilters.inHTMLData(o.type);
-                            o.name = xssFilters.inHTMLData(o.name);
-                            o.fill_color = xssFilters.inHTMLData(o.fill_color);
-                            o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
-                            o.image = xssFilters.inHTMLData(o.image);
-
-                            // get object count for new z
-                            mdb.collection('objects').count({ mission_id: ObjectID(socket.mission) }, function(err, count) {
-                                if (!err) {
-                                    var object;
-                                    if (o.type === 'icon' || o.type === 'shape')
-                                        object = { mission_id: ObjectID(socket.mission), type: o.type, name: o.name, fill_color: o.fill_color, stroke_color: o.stroke_color, image: o.image, scale_x: o.scale_x, scale_y: o.scale_y, rot: o.rot, x: o.x, y: o.y, z: count, locked: o.locked, deleted: false };
-                                    else if (o.type === 'link')
-                                        object = { mission_id: ObjectID(socket.mission), type: o.type, name: o.name, stroke_color: o.stroke_color, image: o.image, obj_a: ObjectID(o.obj_a), obj_b: ObjectID(o.obj_b), z: 0, locked:o.locked, deleted: false };
-                                    // add object to db
-                                    mdb.collection('objects').insertOne(object, function (err, result) {
-                                        if (!err) {
-                                            // if link, push to back
-                                            if (o.type === 'link') {
-                                                mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: { $ne: true } } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
-                                                    var zs = rows.map(r => String(r._id));
-                                                    zs.move(zs.indexOf(String(object._id)), 0);
-                                                    async.forEachOf(zs, function(item, index, callback) {
-                                                        var new_values = { $set: { z: index }};
-                                                        mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
-                                                            if (err)
-                                                                console.log(err);
-                                                            callback();
-                                                        });
-                                                    }, function(err) {
-                                                        insertLogEvent(socket, 'Created ' + o.type + ': ' + o.name + '.');
-                                                        sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: object }));
-                                                    });
-                                                });
-                                            } else {
-                                                // push object back to room
-                                                insertLogEvent(socket, 'Created ' + o.type + ': ' + o.name + '.');
-                                                sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: object }));
-                                            }
-                                        } else {
-                                            console.log(err);
-                                        }
-                                    });
-                                } else {
-                                    console.log(err);
-                                }
-                            });
-                        }
-                    }
-                    break;
-
-                case 'delete_object':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        var o = msg.arg;
-                        if (!o.type || !o._id || !ObjectID.isValid(o._id))
-                            break;
-
-                        if (o.type === 'icon' || o.type === 'shape' || o.type == 'link') {
-                            var query = {};
-                            if (o.type === 'icon' || o.type === 'shape')
-                                query = { $or: [ { _id: ObjectID(o._id) }, { obj_a: ObjectID(o._id) }, { obj_b: ObjectID(o._id) } ] };
-                            else if (o.type === 'link')
-                                query = { _id: ObjectID(o._id) };
-                            mdb.collection('objects').find(query, { _id: 1 }).toArray(function(err, rows) {
-                                if (!err) {
-                                    async.each(rows, function(row, callback) {
-                                        mdb.collection('objects').updateOne({ _id: ObjectID(row._id) }, { $set: { deleted: true }}, function (err, result) {
-                                            if (!err) {
-                                                console.log(row._id);
-                                                sendToRoom(socket.room, JSON.stringify({act: 'delete_object', arg:row._id}));
-                                            } else
-                                                console.log(err);
-                                        });
-                                    }, function() {
-                                        mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission) }, { deleted: { $ne: true } } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
-                                            var zs = rows.map(r => String(r._id));
-                                            async.forEachOf(zs, function(item, index, callback) {
-                                                var new_values = { $set: { z: index }};
-                                                mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
-                                                    if (err)
-                                                        console.log(err);
-                                                    callback();
-                                                });
-                                            });
-                                        });
-                                    });
-                                } else {
-                                    console.log(err);
-                                }
-                            });
-                        }
-                    }
-                    break;
-
-                case 'change_object':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        var o = msg.arg;
-                        
-                        if (!o._id || !ObjectID.isValid(o._id) || !o.type)
-                            break;
-
+                        o.type = xssFilters.inHTMLData(o.type);
                         o.name = xssFilters.inHTMLData(o.name);
                         o.fill_color = xssFilters.inHTMLData(o.fill_color);
                         o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
                         o.image = xssFilters.inHTMLData(o.image);
 
-                        var new_values = {};
-                        if (o.type === 'icon' || o.type === 'shape')
-                            new_values = { $set: { name: o.name, fill_color: o.fill_color, stroke_color: o.stroke_color, image: o.image, locked: o.locked }};
-                        else if (o.type === 'link')
-                            new_values = { $set: { name: o.name, stroke_color: o.stroke_color }};
-                        else
-                            break;
+                        // get object count for new z
+                        mdb.collection('objects').count({ mission_id: ObjectID(socket.mission_id) }, function(err, count) {
+                            if (!err) {
+                                var new_object;
+                                if (o.type === 'icon' || o.type === 'shape')
+                                    new_object = { mission_id: ObjectID(socket.mission_id), type: o.type, name: o.name, fill_color: o.fill_color, stroke_color: o.stroke_color, image: o.image, scale_x: o.scale_x, scale_y: o.scale_y, rot: o.rot, x: o.x, y: o.y, z: count, locked: o.locked, deleted: false };
+                                else if (o.type === 'link')
+                                    new_object = { mission_id: ObjectID(socket.mission_id), type: o.type, name: o.name, stroke_color: o.stroke_color, image: o.image, obj_a: ObjectID(o.obj_a), obj_b: ObjectID(o.obj_b), z: 0, locked:o.locked, deleted: false };
+                                // add object to db
+                                mdb.collection('objects').insertOne(new_object, function (err, result) {
+                                    if (!err) {
+                                        // if link, push to back
+                                        if (o.type === 'link') {
+                                            mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission_id) }, { deleted: { $ne: true } } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                                var zs = rows.map(r => String(r._id));
+                                                zs.move(zs.indexOf(String(new_object._id)), 0);
+                                                async.forEachOf(zs, function(item, index, callback) {
+                                                    var new_values = { $set: { z: index }};
+                                                    mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                                        if (err)
+                                                            callback(err);
+                                                        else
+                                                            callback();
+                                                    });
+                                                }, function(err) {
+                                                    insertLogEvent(socket, 'Created ' + o.type + ': ' + o.name + '.');
+                                                    sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: [new_object] }));
+                                                });
+                                            });
+                                        } else {
+                                            // push object back to room
+                                            insertLogEvent(socket, 'Created ' + o.type + ': ' + o.name + '.');
+                                            sendToRoom(socket.room, JSON.stringify({ act: 'insert_object', arg: [new_object] }));
+                                        }
+                                    } else {
+                                        console.log(err);
+                                    }
+                                });
+                            } else {
+                                console.log(err);
+                            }
+                        });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
+                    }
+                    break;
+
+                case 'delete_object':
+                    var o = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_diagram') || !o._id || !ObjectID.isValid(o._id)) {
+                        var query = { $or: [ { _id: ObjectID(o._id) }, { obj_a: ObjectID(o._id) }, { obj_b: ObjectID(o._id) } ] };
+                        mdb.collection('objects').find(query, { _id: 1 }).toArray(function(err, rows) {
+                            if (!err) {
+                                async.each(rows, function(row, callback) {
+                                    mdb.collection('objects').updateOne({ _id: ObjectID(row._id) }, { $set: { deleted: true }}, function (err, result) {
+                                        if (!err) {
+                                            sendToRoom(socket.room, JSON.stringify({act: 'delete_object', arg:row._id}));
+                                        } else
+                                            console.log(err);
+                                    });
+                                }, function(err) {
+                                    mdb.collection('objects').find({ $and: [ { mission_id: ObjectID(socket.mission_id) }, { deleted: { $ne: true } } ] }, { _id: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                                        var zs = rows.map(r => String(r._id));
+                                        async.forEachOf(zs, function(item, index, callback) {
+                                            var new_values = { $set: { z: index }};
+                                            mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                                if (err)
+                                                    callback(err)
+                                                else
+                                                    callback();
+                                            });
+                                        });
+                                    });
+                                });
+                            } else {
+                                console.log(err);
+                            }
+                        });
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
+                    break;
+
+                case 'change_object':
+                    var o = msg.arg;
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_diagram') && ajv.validate(validators.change_object, o)) {
+                        o.name = xssFilters.inHTMLData(o.name);
+                        o.fill_color = xssFilters.inHTMLData(o.fill_color);
+                        o.stroke_color = xssFilters.inHTMLData(o.stroke_color);
+                        o.image = xssFilters.inHTMLData(o.image);
+
+                        var new_values = { $set: { name: o.name, fill_color: o.fill_color, stroke_color: o.stroke_color, image: o.image, locked: o.locked }};
                         mdb.collection('objects').updateOne({ _id: ObjectID(o._id) }, new_values, function (err, result) {
                             if (!err) {
                                 insertLogEvent(socket, 'Modified object: ' + o.name + ' ID: ' + o._id + '.');
@@ -1038,58 +1031,71 @@ ws.on('connection', function(socket, req) {
                                 console.log(err);
                             }
                         });
+                    } else {
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
 
                 case 'move_object':
-                    if (hasPermission(socket.mission_permissions[socket.mission], 'modify_diagram')) {
-                        // move objects (z-axis)
-                        if (msg.arg.length === 1 && msg.arg[0].z !== undefined && msg.arg[0]._id && ObjectID.isValid(msg.arg[0]._id)) {
-                            var o = msg.arg[0];
-                            o.z = Math.floor(o.z);
-                            mdb.collection('objects').find({ mission_id: ObjectID(socket.mission), deleted: { $ne: true } }, { _id: 1, z: 1, name: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
-                                if (rows) {
-                                    var zs = rows.map(r => String(r._id));
-                                    zs.move(zs.indexOf(String(o._id)), o.z);
-                                    async.forEachOf(zs, function(item, index, callback) {
-                                        var new_values = { $set: { z: index }};
-                                        mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
-                                            if (err)
-                                                console.log(err);
-                                            callback();
-                                        });
-                                    }, function(err) {
-                                        sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: msg.arg}));
-                                    });
-                                } else {
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_diagram')) {
+                        msg.arg.sort(dynamicSort('z'));
+                        var args = []; // for x/y moves
+                        var args_broadcast = []; // for z moves... to everyone
+                        mdb.collection('objects').find({ mission_id: ObjectID(socket.mission_id), deleted: { $ne: true } }, { _id: 1, z: 1, name: 1 }).sort({ z: 1 }).toArray(function(err, rows) {
+                            if (rows) {
+                                var zs = rows.map(r => String(r._id));
+                                async.eachOf(msg.arg, function(o, index, callback) {
+                                    if (ajv.validate(validators.move_object, o)) {
+                                        // move objects (z-axis)
+                                        if (o.z !== zs.indexOf(o._id)) {
+                                            o.z = Math.floor(o.z);
+                                            zs.move(zs.indexOf(String(o._id)), o.z);
+                                            async.forEachOf(zs, function(item, index, callback) {
+                                                var new_values = { $set: { z: index }};
+                                                mdb.collection('objects').updateOne({ _id: ObjectID(item) }, new_values, function (err, result) {
+                                                    if (err)
+                                                        callback(err);
+                                                    else {
+                                                        if (item === o._id)
+                                                            args_broadcast.push(o);
+                                                        callback();
+                                                    }
+                                                });
+                                            }, function(err) { // async callback
+                                                if (err)
+                                                    callback(err);
+                                                else
+                                                    callback();
+                                            });
+                                        // move objects (x/y axis)
+                                        } else {
+                                            o.x = Math.round(o.x);
+                                            o.y = Math.round(o.y);
+                                            var new_values = { $set: { x: o.x, y: o.y, scale_x: o.scale_x, scale_y: o.scale_y, rot: o.rot }};
+                                            mdb.collection('objects').updateOne({ _id: ObjectID(o._id) }, new_values, function (err, result) {
+                                                if (err)
+                                                    callback(err)
+                                                else
+                                                    args.push(o);
+                                                    callback();
+                                            });
+                                        }
+                                    }
+                                }, function (err) { // async callback
                                     if (err)
                                         console.log(err);
-                                }
-                            });
-                        // move objects (x/y axis)
-                        } else {
-                            var args = [];
-                            async.eachOf(msg.arg, function(o, index, callback) {
-                                if (o.type !== undefined && (o.type === 'icon' || o.type === 'shape') && ObjectID.isValid(o._id)) {
-                                    o.x = Math.round(o.x);
-                                    o.y = Math.round(o.y);
-                                    var new_values = { $set: { x: o.x, y: o.y, scale_x: o.scale_x, scale_y: o.scale_y, rot: o.rot }};
-                                    mdb.collection('objects').updateOne({ _id: ObjectID(o._id) }, new_values, function (err, result) {
-                                        if (!err) {
-                                            args.push(o);
-                                        } else {
-                                            console.log(err);
-                                        }
-                                    });
-                                }
-                            }, function (err) {
+                                    else {
+                                        sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: args.concat(args_broadcast)}), socket);
+                                        socket.send(JSON.stringify({act: 'move_object', arg: args_broadcast}));
+                                    }
+                                });
+                            } else { // no rows or error
                                 if (err)
                                     console.log(err);
-                                else
-                                    sendToRoom(socket.room, JSON.stringify({act: 'move_object', arg: args}), socket);
-                            });
-                        }
-                    }
+                            }
+                        });
+                    } else
+                        socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     break;
 
                 case 'change_link':
@@ -1099,12 +1105,13 @@ ws.on('connection', function(socket, req) {
                     break;
 
             }
+            console.log(msg.msgId);
             if (msg.msgId !== undefined) {
                 socket.send(JSON.stringify({act: 'ack', arg: msg.msgId}));
             }
         }
     });
-});
+}
 
 app.get('/', function (req, res) {
     if (req.session.loggedin) {
@@ -1155,8 +1162,7 @@ app.post('/api/alert', function(req, res) {
             msg.user_id = row._id;
             msg.username = row.username;
 
-
-           mdb.collection('missions').aggregate([
+            mdb.collection('missions').aggregate([
                 {
                     $match: { _id: ObjectID(req.body.mission_id), 'mission_users.user_id': ObjectID(msg.user_id), deleted: { $ne: true } }
                 },{
@@ -1171,7 +1177,7 @@ app.post('/api/alert', function(req, res) {
             ]).toArray(function(err, row) { 
                 if (row) {
                     if( hasPermission(row[0].permissions, 'api_access')) {
-                        sendToRoom(req.body.mission_id, JSON.stringify({act:'chat', arg:{messages:[msg]}}));
+                        sendToRoom(req.body.mission_id, JSON.stringify({ act:'chat', arg: [msg] }));
                         res.end('OK');
                     }
                 } else {
@@ -1301,7 +1307,6 @@ app.post('/api/:table', function (req, res) {
                     if (cop_permissions.indexOf(req.body.permissions[i]) > -1)
                         new_perms.push(req.body.permissions[i]);
                 }
-                req.body.permissions = new_perms.join(',');
             }
             if (req.body.password !== '') {
                 bcrypt.hash(req.body.password, null, null, function(err, hash) {
@@ -1486,17 +1491,34 @@ app.get('/cop', function (req, res) {
     var mission_permissions = null;
     if (req.session.loggedin) {
         if (req.query.mission !== undefined && req.query.mission && ObjectID.isValid(req.query.mission)) {
-            mdb.collection('missions').findOne({ _id: ObjectID(req.query.mission), deleted: { $ne: true } }, function(err, row) {
-                console.log(row);
-                if (row) {
+            mdb.collection('missions').aggregate([
+                {
+                    $match: { _id: ObjectID(req.query.mission), 'mission_users.user_id': ObjectID(req.session.user_id), deleted: { $ne: true } }
+                },{
+                    $unwind: '$mission_users'
+                },{
+                    $match: { 'mission_users.user_id': ObjectID(req.session.user_id) }
+                },{
+                    $project: {
+                        name: 1,
+                        mission_role: 1,
+                        permissions: '$mission_users.permissions',
+                    }
+                }
+            ]).toArray(function(err, row) {
+                if (row && row.length > 0) {
                     fs.readdir('./public/images/icons', function(err, icons) {
                         fs.readdir('./public/images/shapes', function(err, shapes) {
                             fs.readdir('./public/images/links', function(err, links) {
-                                var mission_name = row.name;
-                                //if (req.session.username === 'admin')
-                                    mission_permissions = 'all'; //admin has all permissions
+                                var mission_name = row[0].name;
+                                if (req.session.username === 'admin')
+                                    mission_permissions = ['all']; //admin has all permissions
+                                else
+                                    mission_permissions = row[0].permissions;
+                                
                                 req.session.mission_role[req.query.mission] = mission_role;
                                 req.session.mission_permissions[req.query.mission] = mission_permissions;
+
                                 if (req.session.username === 'admin' || (mission_permissions && mission_permissions !== '')) // always let admin in
                                     res.render('cop', { title: 'MCSCOP - ' + mission_name, role: mission_role, permissions: mission_permissions, mission_name: mission_name, user_id: req.session.user_id, username: req.session.username, icons: icons.filter(getPNGs), shapes: shapes.filter(getPNGs), links: links.filter(getPNGs)});
                                 else
@@ -1505,11 +1527,10 @@ app.get('/cop', function (req, res) {
                         });
                     });
                 } else {
-                    res.redirect('login');
-                    if(err)
+                     res.redirect('login');
+                     if (err)
                         console.log(err);
                 }
-
             });
         } else {
             res.redirect('../');
@@ -1535,14 +1556,7 @@ app.post('/login', function (req, res) {
                         req.session.mission_permissions = {};
                         req.session.mission_role = {};
                         req.session.mission_sub_roles = {};
-//                            connection.query('SELECT sub_role_id FROM sub_role_rel WHERE role_id = ?', [rows[0].role], function (err, rows, fields) {
-//                               if (!err) {
-//                                for (var i = 0; i < rows.length; i++) {
-  //                                  req.session.sub_roles.push(rows[i].sub_role_id);
-    //                            }
-      //                      }
-                            res.redirect('login');
-        //                });
+                        res.redirect('login');
                     } else
                         res.render('login', { title: 'MCSCOP', message: 'Invalid username or password.' });
                 });
@@ -1573,21 +1587,21 @@ app.post('/dir/', function (req, res) {
         return;
     }
     var dir = req.body.id;
-    var mission = req.body.mission;
-    if (dir && mission && dir !== '#') {
+    var mission_id = req.body.mission_id;
+    if (dir && mission_id && dir !== '#') {
         dir = path.normalize(dir).replace(/^(\.\.[\/\\])+/, '');
-        dir = path.join(__dirname + '/mission-files/mission-' + mission, dir);
+        dir = path.join(__dirname + '/mission-files/mission-' + mission_id, dir);
         var s = fs.statSync(dir);
         if (s.isDirectory()) {
-            getDir(dir, mission, function(r) {
+            getDir(dir, mission_id, function(r) {
                 res.send(r);
             })
         } else {
             res.status(404).send('Not found');
         }
-    } else if (dir && mission) {
-        dir = path.join(__dirname, '/mission-files/mission-' + mission);
-        getDir(dir, mission, function(r) {
+    } else if (dir && mission_id) {
+        dir = path.join(__dirname, '/mission-files/mission-' + mission_id);
+        getDir(dir, mission_id, function(r) {
             res.send(r);
         });
     }
@@ -1602,17 +1616,17 @@ app.use('/download', express.static(path.join(__dirname, 'mission-files'), {
 }))
 
 app.post('/mkdir', function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
-        res.end('ERR2424');
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission_id], 'modify_files')) {
+        res.end('ERR24');
         return;
     }
     var id = req.body.id;
     var name = req.body.name;
-    var mission = req.body.mission;
-    if (id && name && mission) {
+    var mission_id = req.body.mission_id;
+    if (id && name && mission_id) {
         var dir = path.normalize(id).replace(/^(\.\.[\/\\])+/, '');
         name = path.normalize('/' + name + '/').replace(/^(\.\.[\/\\])+/, '');
-        dir = path.join(path.join(path.join(__dirname, '/mission-files/mission-' + mission + '/'), dir), name);
+        dir = path.join(path.join(path.join(__dirname, '/mission-files/mission-' + mission_id + '/'), dir), name);
         fs.stat(dir, function (err, s) {
             if (err == null)
                 res.status(500).send('mkdir error');
@@ -1622,7 +1636,7 @@ app.post('/mkdir', function (req, res) {
                         res.status(500).send('mkdir error');
                     else {
                         res.send('{}');
-                        sendToRoom(req.body.mission, JSON.stringify({act: 'update_files', arg: null}));
+                        sendToRoom(req.body.mission_id, JSON.stringify({act: 'update_files', arg: null}));
                     }
                });
             } else {
@@ -1634,18 +1648,18 @@ app.post('/mkdir', function (req, res) {
 });
 
 app.post('/mv', function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission_id], 'modify_files')) {
         res.end('ERR25');
         return;
     }
     var dst = req.body.dst;
     var src = req.body.src;
-    var mission = req.body.mission;
-    if (dst && src && mission) {
+    var mission_id = req.body.mission_id;
+    if (dst && src && mission_id) {
         var dstdir = path.normalize(dst).replace(/^(\.\.[\/\\])+/, '');
         var srcdir = path.normalize(src).replace(/^(\.\.[\/\\])+/, '');
-        dstdir = path.join(path.join(__dirname, '/mission-files/mission-' + mission), dstdir);
-        srcdir = path.join(path.join(__dirname, '/mission-files/mission-' + mission), srcdir);
+        dstdir = path.join(path.join(__dirname, '/mission-files/mission-' + mission_id), dstdir);
+        srcdir = path.join(path.join(__dirname, '/mission-files/mission-' + mission_id), srcdir);
         fs.stat(dstdir, function (err, s) {
             if (s.isDirectory()) {
                 fs.stat(srcdir, function (err, s) {
@@ -1655,7 +1669,7 @@ app.post('/mv', function (req, res) {
                                 res.status(500).send('mv error');
                             else {
                                 res.send('{}');
-                                sendToRoom(req.body.mission, JSON.stringify({act: 'update_files', arg: null}));
+                                sendToRoom(req.body.mission_id, JSON.stringify({act: 'update_files', arg: null}));
                             }
                         });
                     } else
@@ -1669,15 +1683,15 @@ app.post('/mv', function (req, res) {
 });
 
 app.post('/delete', function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission_id], 'modify_files')) {
         res.end('ERR26');
         return;
     }
     var id = req.body.id;
-    var mission = req.body.mission;
+    var mission_id = req.body.mission_id;
     if (id) {
         var dir = path.normalize(id).replace(/^(\.\.[\/\\])+/, '');
-        dir = path.join(path.join(__dirname, '/mission-files/mission-' + mission + '/'), dir);
+        dir = path.join(path.join(__dirname, '/mission-files/mission-' + mission_id + '/'), dir);
         fs.stat(dir, function (err, s) {
             if (err)
                 res.status(500).send('delete error');
@@ -1687,7 +1701,7 @@ app.post('/delete', function (req, res) {
                         res.status(500).send('delete error');
                     else {
                         res.send('{}');
-                        sendToRoom(req.body.mission, JSON.stringify({act: 'update_files', arg: null}));
+                        sendToRoom(req.body.mission_id, JSON.stringify({act: 'update_files', arg: null}));
                     }
                });
             } else {
@@ -1696,7 +1710,7 @@ app.post('/delete', function (req, res) {
                         res.status(500).send('delete error');
                     else {
                         res.send('{}');
-                        sendToRoom(req.body.mission, JSON.stringify({act: 'update_files', arg: null}));
+                        sendToRoom(req.body.mission_id, JSON.stringify({act: 'update_files', arg: null}));
                     }
                });
             }
@@ -1706,14 +1720,14 @@ app.post('/delete', function (req, res) {
 });
 
 app.post('/upload', upload.any(), function (req, res) {
-    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission], 'modify_files')) {
+    if (!req.session.loggedin || !hasPermission(req.session.mission_permissions[req.body.mission_id], 'modify_files')) {
         res.end('ERR27');
         return;
     }
-    if (req.body.dir && req.body.dir.indexOf('_anchor') && req.body.mission) {
+    if (req.body.dir && req.body.dir.indexOf('_anchor') && req.body.mission_id) {
         var dir = req.body.dir.substring(0,req.body.dir.indexOf('_anchor'));
         dir = path.normalize(dir).replace(/^(\.\.[\/\\])+/, '');
-        dir = path.join(__dirname + '/mission-files/mission-' + req.body.mission + '/', dir);
+        dir = path.join(__dirname + '/mission-files/mission-' + req.body.mission_id + '/', dir);
         async.each(req.files, function(file, callback) {
             fs.rename(file.path, dir + '/' + file.originalname, function(err) {
                 if (err)
@@ -1723,7 +1737,7 @@ app.post('/upload', upload.any(), function (req, res) {
             });
         }, function() {
             res.send('{}');
-            sendToRoom(req.body.mission, JSON.stringify({act: 'update_files', arg: null}));
+            sendToRoom(req.body.mission_id, JSON.stringify({act: 'update_files', arg: null}));
         });
     } else
        res.status(404).send('Y U bein wierd?');

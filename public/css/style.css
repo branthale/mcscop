@@ -539,10 +539,6 @@ button.pane-close {
     flex-direction: column;
 }
 
-.modal-dialog {
-    width: 800px;
-}
-
 .container .jumbotron {
     border-radius: 0px;
     padding: 10px;

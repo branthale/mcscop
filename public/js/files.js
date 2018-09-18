@@ -19,7 +19,7 @@ var f = function(e)
             $.each(e.dataTransfer.files, function(i, file) {
                 formData.append('file',file);
             });
-            formData.append('mission', mission);
+            formData.append('mission_id', mission_id);
             $.ajax({
                 url: 'upload',
                 type: 'POST',
@@ -70,7 +70,7 @@ $(document).ready(function() {
     $('#files')
         .on('select_node.jstree', function(e, data) {
             if (data.node.li_attr.isLeaf) {
-                var o = 'download/mission-' + mission + '/' + data.selected[0];
+                var o = 'download/mission-' + mission_id + '/' + data.selected[0];
                 var dl = $('<iframe />').attr('src', o).hide().appendTo('body');
             }
         }).jstree({
@@ -84,7 +84,7 @@ $(document).ready(function() {
                     'data': function(node) {
                         return {
                             id: node.id,
-                            mission: mission
+                            mission_id: mission_id
                         };
                     }
                 }
@@ -104,7 +104,7 @@ $(document).ready(function() {
                                     $.ajax({
                                         url: 'mkdir',
                                         type: 'POST',
-                                        data: {'id': _node.id, 'name': name, 'mission': mission},
+                                        data: {'id': _node.id, 'name': name, 'mission_id': mission_id},
                                         success: function() {
                                         },
                                         error: function() {
@@ -122,7 +122,7 @@ $(document).ready(function() {
                                 $.ajax({
                                     url: 'delete',
                                     type: 'POST',
-                                    data: {'id': node.id, 'mission': mission},
+                                    data: {'id': node.id, 'mission_id': mission_id},
                                     success: function() {
                                     },
                                     error: function() {
