@@ -83,7 +83,6 @@ ShareDB.types.register(richText.type);
 const backend = new ShareDB({sdb: sdb, disableDocAction: true, disableSpaceDelimitedActions: true});
 
 backend.use('receive', function(r,c) {
-//    console.log(r);
     c();
 });
 
@@ -600,11 +599,13 @@ async function setupSocket(socket) {
                                 if (count === 0) {
                                     mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission_id) }, new_values, function (err, result) {
                                         if (!err) {
-                                            socket.send(JSON.stringify({act: 'insert_user_setting', arg: user}));
+                                            sendToRoom(socket.room, JSON.stringify({act: 'insert_user_setting', arg: user}));
                                             insertLogEvent(socket, 'Inserted user setting ID: ' + user.user_id + '.');
                                         } else
                                             console.log(err);
                                     });
+                                } else {
+                                    socket.send(JSON.stringify({ act: 'error', arg: { text: 'User already has a permission entry.' } }));
                                 }
                             } else
                                 console.log(err);
@@ -629,18 +630,34 @@ async function setupSocket(socket) {
                             }
                         }
 
-                        var new_values = { $set: { 'mission_users.$.permissions': new_perms, 'mission_users.$.role': null }  };
+                        var new_values = { $set: { 'mission_users.$.user_id': ObjectID(user.user_id), 'mission_users.$.permissions': new_perms, 'mission_users.$.role': null }  };
 
                         if (user.role && ObjectID.isValid(user.role))
                             new_values.$set['mission_users.$.role'] = ObjectID(user.role);
 
-                        mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission_id), 'mission_users.user_id': ObjectID(user.user_id) }, new_values, function (err, result) {
-                            if (!err) {
-                                socket.send(JSON.stringify({act: 'update_user_setting', arg: user}));
-                                insertLogEvent(socket, 'Modified user setting ID: ' + user.user_id + '.');
-                            } else
-                                console.log(err);
-                        });
+                        mdb.collection('missions').aggregate([
+                            {
+                                $match: { _id: ObjectID(socket.mission_id), deleted: { $ne: true } }
+                            },{
+                                $unwind: '$mission_users'
+                            },{
+                                $match: { 'mission_users._id': { $ne: ObjectID(user._id) }, 'mission_users.user_id': ObjectID(user.user_id) }
+                            }
+                        ]).toArray(function (err, rows) {
+                           if (!err && rows.length == 0) { 
+                                mdb.collection('missions').updateOne({ _id: ObjectID(socket.mission_id), 'mission_users._id': ObjectID(user._id) }, new_values, function (err, result) {
+                                    if (!err) {
+                                        sendToRoom(socket.room, JSON.stringify({act: 'update_user_setting', arg: user}));
+                                        insertLogEvent(socket, 'Modified user setting ID: ' + user.user_id + '.');
+                                    } else
+                                        console.log(err);
+                                });
+                            } else {
+                                if (err)
+                                    console.log(err);
+                                socket.send(JSON.stringify({ act: 'error', arg: { text: 'User already exists.' } }));
+                            }
+                        }); 
                     } else {
                         socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
@@ -664,7 +681,7 @@ async function setupSocket(socket) {
                 // ------------------------- NOTES -------------------------
                case 'insert_note':
                     var e = msg.arg;
-                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'edit_notes') && ajv.validate(validators.insert_note, e)) {
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_notes') && ajv.validate(validators.insert_note, e)) {
 
                         e.name = xssFilters.inHTMLData(e.name);
                         var note = { mission_id: ObjectID(socket.mission_id), name: e.name, deleted: false };
@@ -696,7 +713,7 @@ async function setupSocket(socket) {
 
                 case 'rename_note':
                     var e = msg.arg;
-                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'edit_notes') && ajv.validate(validators.rename_note, e)) {
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_notes') && ajv.validate(validators.rename_note, e)) {
 
                         e.name = xssFilters.inHTMLData(e.name);
                         var new_values = { $set: { name: e.name } };
@@ -717,7 +734,7 @@ async function setupSocket(socket) {
 
                 case 'delete_note':
                     var e = msg.arg;
-                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'edit_notes') && e.id && ObjectID.isValid(e.id)) {
+                    if (hasPermission(socket.mission_permissions[socket.mission_id], 'modify_notes') && e.id && ObjectID.isValid(e.id)) {
 
                         mdb.collection('notes').updateOne({ _id: ObjectID(e.id) }, { $set: { deleted: true } }, function (err, result) {
                             if (!err) {
@@ -1742,11 +1759,11 @@ app.post('/upload', upload.any(), function (req, res) {
 });
 
 app.post('/avatar', upload.any(), function (req, res) {
-    if (!req.session.loggedin || (!hasPermission(req.session.cop_permissions, 'modify_users') && req.session.user_id !== parseInt(req.body.id))) {
+    if (!req.session.loggedin || (!hasPermission(req.session.cop_permissions, 'modify_users') && req.session.user_id !== req.body.id)) {
         res.end('ERR28');
         return;
     }
-    if (req.body.id && !isNaN(req.body.id)) {
+    if (req.body.id) {
         var dir = path.join(__dirname + '/public/images/avatars/');
         async.each(req.files, function(file, callback) {
             fs.rename(file.path, dir + '/' + req.body.id + '.png', function(err) {

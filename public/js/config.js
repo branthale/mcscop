@@ -268,9 +268,9 @@ $(document).ready(function() {
                 { label: '_id', name: '_id', key: true, editable: false, hidden: true },
                 { label: 'Avatar', name: 'avatar', width: 53, fixed: true, editable: false, formatter: function (c, o, r) {
                         if (r.avatar !== null)
-                            return '<img class="droppable avatar" id="avatar_' + r.id + '" src="images/avatars/' + r.id + '.png"/>';
+                            return '<img class="droppable avatar" id="avatar_' + r._id + '" src="images/avatars/' + r._id + '.png"/>';
                         else
-                            return '<img class="droppable avatar" id="avatar_' + r.id + '" src="images/avatars/blank.png"/>';
+                            return '<img class="droppable avatar" id="avatar_' + r._id + '" src="images/avatars/blank.png"/>';
                     }
                 },
                 { label: 'Username', name: 'username', width: 50, editable: users_rw, edittype: 'text' },

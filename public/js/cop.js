@@ -1583,6 +1583,7 @@ function msgHandler() {
         for (m in pendingMsg) {
             clearTimeout(pendingMsg[m]);
         }
+        clearInterval(socket.pingInterval);
         canvas.clear();
         canvas.requestRenderAll();
         $('#modal-close').hide();
@@ -2247,7 +2248,7 @@ $(document).ready(function() {
         $('#modal-body').html('<p>Loading COP, please wait...</p><img src="images/loading.gif"/>');
         $('#modal-footer').html('');
         $('#modal').modal('show');
-        socket.pingIterval = setInterval(function ping() {
+        socket.pingInterval = setInterval(function ping() {
             socket.send(JSON.stringify({ act: 'ping', arg: '', msgId: msgHandler() }));
         }, 10000);
         setTimeout(function() {
@@ -2264,18 +2265,6 @@ $(document).ready(function() {
             case 'ack':
                 clearTimeout(pendingMsg[msg.arg]);
                 delete pendingMsg[msg.arg];
-                break;
-
-            case 'disco':
-                canvas.clear();
-                canvas.requestRenderAll();
-                $('#modal-close').hide();
-                $('#modal-header').html('Attention!');
-                $('#modal-body').html('<p>Connection lost! Please refresh the page to continue!</p>');
-                $('#modal-footer').html('');
-                $('#modal-content').removeAttr('style');
-                $('#modal-content').removeClass('modal-details');
-                $('#modal').removeData('bs.modal').modal({backdrop: 'static', keyboard: false});
                 break;
 
             case 'error':
@@ -2626,6 +2615,7 @@ $(document).ready(function() {
     socket.onclose = function() {
         canvas.clear();
         canvas.requestRenderAll();
+        clearInterval(socket.pingInterval);
         $('#modal-close').hide();
         $('#modal-title').text('Attention!');
         $('#modal-body').html('<p>Connection lost! Please refesh the page to retry!</p>');
@@ -2968,11 +2958,13 @@ $(document).ready(function() {
                                     $('#opnotes2 tr#'+$.jgrid.jqID(lastselection.id)+ ' div.ui-inline-del').show();
                                     $('#opnotes2 tr#'+$.jgrid.jqID(lastselection.id)+ ' div.ui-inline-save-row').hide();
                                     $('#opnotes2 tr#'+$.jgrid.jqID(lastselection.id)+ ' div.ui-inline-cancel-row').hide();
+                                    $('#opnotes2 tr#'+$.jgrid.jqID(lastselection.id)+ ' div.ui-inline-edit-details').show();
                                 }
                                 $('#details_'+$.jgrid.jqID(id)).hide();
                                 $('#opnotes2 tr#'+$.jgrid.jqID(id)+ ' div.ui-inline-del').hide();
                                 $('#opnotes2 tr#'+$.jgrid.jqID(id)+ ' div.ui-inline-save-row').show();
                                 $('#opnotes2 tr#'+$.jgrid.jqID(id)+ ' div.ui-inline-cancel-row').show();
+                                $('#opnotes2 tr#'+$.jgrid.jqID(id)+ ' div.ui-inline-edit-details').hide();
                                 lastselection = {id: id, iRow: iRow, iCol: iCol};
                             },
                             afterrestorefunc: function() {
