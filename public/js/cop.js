@@ -2189,7 +2189,7 @@ function getUserSelect() {
 }
 
 function getObjectSelect() {
-    var res = ' : ';
+    var res = ':';
     var objs = canvas.getObjects();
     objs.sort(function(a, b) {
         if (!a.name_val || !b.name_val)

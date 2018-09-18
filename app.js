@@ -788,6 +788,7 @@ async function setupSocket(socket) {
                                 console.log(err);
                         });
                     } else {
+                        console.log(ajv.errors);
                         socket.send(JSON.stringify({ act: 'error', arg: { text: 'Error: Permission denied. Changes not saved.' } }));
                     }
                     break;
