@@ -176,7 +176,7 @@ var roleSelect = [{_id:'', name:''}];
 var dateSlider = null;
 var objectsLoaded = null;
 var updatingObject = false;
-var wsdg;
+var socket;
 var toolbarState = false;
 var firstNode = null;
 var hSnap = false;
@@ -505,7 +505,7 @@ function objectModified(o) {
     updateMinimapBg();
 
     // send changes to db
-    wsdg.send(JSON.stringify({act: 'move_object', arg: args, msgId: msgHandler()}));
+    socket.send(JSON.stringify({act: 'move_object', arg: args, msgId: msgHandler()}));
 }
 
 canvas.on('object:modified', function(options) {
@@ -1000,7 +1000,7 @@ function updateSelection(options) {
                         $('#cancelLink').hide();
                         lastFillColor = $('#propFillColor').val();
                         lastFillColor = $('#propStrokeColor').val();
-                        wsdg.send(JSON.stringify({act: 'insert_object', arg: {name:$('#propName').val(), type: 'link', image: $('#prop-link').val().replace('.png','.svg'), stroke_color:$('#propStrokeColor').val(), fill_color:$('#propFillColor').val(), obj_a: firstNode._id, obj_b: o._id, x: 0, y: 0, z: 0, locked: $('#lockObject').is(':checked')}, msgId: msgHandler()}));
+                        socket.send(JSON.stringify({act: 'insert_object', arg: {name:$('#propName').val(), type: 'link', image: $('#prop-link').val().replace('.png','.svg'), stroke_color:$('#propStrokeColor').val(), fill_color:$('#propFillColor').val(), obj_a: firstNode._id, obj_b: o._id, x: 0, y: 0, z: 0, locked: $('#lockObject').is(':checked')}, msgId: msgHandler()}));
                         firstNode = null;
                         creatingLink = false;
                     }
@@ -1035,7 +1035,7 @@ function updateSelection(options) {
 
 function newNote() {
     bootbox.prompt('Note name?', function(name) {
-        wsdg.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
+        socket.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
     });
 }
 
@@ -1319,7 +1319,7 @@ function addChatMessage(messages, bulk) {
 // called when a user requests more history from teh current chat
 function getMoreMessages(channel) {
     $('#get-more-messages').remove();
-    wsdg.send(JSON.stringify({act:'get_old_chats', arg: {channel: channel, start_from: earliest_messages[channel]}, msgId: msgHandler()}));
+    socket.send(JSON.stringify({act:'get_old_chats', arg: {channel: channel, start_from: earliest_messages[channel]}, msgId: msgHandler()}));
 }
 
 // ---------------------------- SETTINGS COOKIE ----------------------------------
@@ -1368,7 +1368,7 @@ function createNotesTree(arg) {
                             'action': function (obj) {
                                 var _node = node;
                                 bootbox.prompt('Note name?', function(name) {
-                                    wsdg.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
+                                    socket.send(JSON.stringify({act: 'insert_note', arg: {name: name}, msgId: msgHandler()}));
                                 });
                             }
                         },
@@ -1379,7 +1379,7 @@ function createNotesTree(arg) {
                             'action': function (obj) {
                                 var _node = node;
                                 bootbox.prompt('Rename note to?', function(name) {
-                                    wsdg.send(JSON.stringify({act: 'rename_note', arg: {id: node.id, name: name}, msgId: msgHandler()}));
+                                    socket.send(JSON.stringify({act: 'rename_note', arg: {id: node.id, name: name}, msgId: msgHandler()}));
                                 });
                             }
                         },
@@ -1388,7 +1388,7 @@ function createNotesTree(arg) {
                             'separator_after': false,
                             'label': 'Delete Note',
                             'action': function (obj) {
-                                wsdg.send(JSON.stringify({act: 'delete_note', arg: {id: node.id}, msgId: msgHandler()}));
+                                socket.send(JSON.stringify({act: 'delete_note', arg: {id: node.id}, msgId: msgHandler()}));
                             }
                         }
                     }
@@ -1805,14 +1805,14 @@ function insertObject() {
         var center = new fabric.Point(canvas.width / 2, canvas.height / 2);
         lastFillColor = $('#propFillColor').val();
         lastStrokeColor = $('#propStrokeColor').val();
-        wsdg.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), locked: $('#lockObject').is(':checked'), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom() - settings.x / canvas.getZoom()), y: Math.round(center.y / canvas.getZoom() - settings.y / canvas.getZoom()), z: canvas.getObjects().length}, msgId: msgHandler()})); 
+        socket.send(JSON.stringify({act: 'insert_object', arg:{name:$('#propName').val(), fill_color:$('#propFillColor').val(), stroke_color:$('#propStrokeColor').val(), locked: $('#lockObject').is(':checked'), image:$('#prop-' + $('#propType').val()).val().replace('.png','.svg'), type:$('#propType').val(), x: Math.round(center.x / canvas.getZoom() - settings.x / canvas.getZoom()), y: Math.round(center.y / canvas.getZoom() - settings.y / canvas.getZoom()), z: canvas.getObjects().length}, msgId: msgHandler()})); 
     }
 }
 
 // send object deletions to db
 function deleteObject() {
     if (canvas.getActiveObject()._id) {
-        wsdg.send(JSON.stringify({act: 'delete_object', arg: { _id:canvas.getActiveObject()._id, type:canvas.getActiveObject().objType }, msgId: msgHandler()}));
+        socket.send(JSON.stringify({act: 'delete_object', arg: { _id:canvas.getActiveObject()._id, type:canvas.getActiveObject().objType }, msgId: msgHandler()}));
     }
 }
 
@@ -1823,23 +1823,23 @@ function pasteObjects() {
     for (var i = 0; i < canvasClipboard.length; i++) {
         args.push({ _id: canvasClipboard[i]._id, x: Math.round(center.x / canvas.getZoom() - settings.x / canvas.getZoom()) + canvasClipboard[i].x, y: Math.round(center.y / canvas.getZoom() - settings.y / canvas.getZoom()) + canvasClipboard[i].y, z: canvas.getObjects().length + canvasClipboard[i].z});
     }
-    wsdg.send(JSON.stringify({act: 'paste_object', arg: args,  msgId: msgHandler()}));
+    socket.send(JSON.stringify({act: 'paste_object', arg: args,  msgId: msgHandler()}));
 }
 
 // send chat message to db
 function sendChatMessage(msg, channel) {
-    wsdg.send(JSON.stringify({act: 'insert_chat', arg: {channel: channel, text: msg}, msgId: msgHandler()}));
+    socket.send(JSON.stringify({act: 'insert_chat', arg: {channel: channel, text: msg}, msgId: msgHandler()}));
 }
 
 // move objects up / down on canvas
 function moveToZ(o, z) {
     if (o) {
         if (o.objType === 'link')
-            wsdg.send(JSON.stringify({act: 'move_object', arg: [{_id: o._id, scale_x: 0, scale_y: 0, x: 0, y: 0, z: z, rot: 0}], msgId: msgHandler()}));
+            socket.send(JSON.stringify({act: 'move_object', arg: [{_id: o._id, scale_x: 0, scale_y: 0, x: 0, y: 0, z: z, rot: 0}], msgId: msgHandler()}));
         else if (o.objType === 'icon')
-            wsdg.send(JSON.stringify({act: 'move_object', arg: [{_id: o._id, x: o.left, y: o.top, z: z, scale_x: o.scaleX, scale_y: o.scaleY, rot: o.angle}], msgId: msgHandler()}));
+            socket.send(JSON.stringify({act: 'move_object', arg: [{_id: o._id, x: o.left, y: o.top, z: z, scale_x: o.scaleX, scale_y: o.scaleY, rot: o.angle}], msgId: msgHandler()}));
         else if (o.objType === 'shape')
-            wsdg.send(JSON.stringify({act: 'move_object', arg: [{_id: o._id, x: o.left, y: o.top, z: z, scale_x: o.width, scale_y: o.height, rot: o.angle}], msgId: msgHandler()}));
+            socket.send(JSON.stringify({act: 'move_object', arg: [{_id: o._id, x: o.left, y: o.top, z: z, scale_x: o.width, scale_y: o.height, rot: o.angle}], msgId: msgHandler()}));
     }
 }
 
@@ -1934,7 +1934,7 @@ function changeObject(o) {
             tempObj.name = o.children[i].text;
         }
     }
-    wsdg.send(JSON.stringify({act: 'change_object', arg: tempObj, msgId: msgHandler()}));
+    socket.send(JSON.stringify({act: 'change_object', arg: tempObj, msgId: msgHandler()}));
 }
 
 // bottom table toggle
@@ -2139,17 +2139,18 @@ function deleteRowConfirm(type, table, _id, prefix) {
 
 // handle sending jqgrid deletes and updating the grid
 function deleteRow(type, table, _id, prefix) {
-    wsdg.send(JSON.stringify({act: 'delete_' + type, arg: { _id: _id }, msgId: msgHandler()}));
+    socket.send(JSON.stringify({act: 'delete_' + type, arg: { _id: _id }, msgId: msgHandler()}));
     $(table).jqGrid('delRowData', prefix + _id);
 }
 
 // handle sending jqgrid saves / inserts and updating the grid
-function saveRow(type, table, _id, prefix) {
+function saveRow(type, table, _id) {
+    console.log(type, table, _id);
     addingRow = false;
     var data = {};
     var act = "update_" + type;
     if (_id.indexOf('jqg') !== -1) {
-        $(table + ' #' + prefix + _id).find('input, select, textarea').each(function () {
+        $(table + ' #' + _id).find('input, select, textarea').each(function () {
             data[this.name] = $(this).val();
         });
         act = "insert_" + type;
@@ -2162,7 +2163,7 @@ function saveRow(type, table, _id, prefix) {
         data.event_time = dateStringToEpoch(data.event_time);
     if (data.discovery_time)
         data.discovery_time = dateStringToEpoch(data.discovery_time);
-    $(table).jqGrid('restoreRow', prefix + _id, function(){ setTimeout(function() { wsdg.send(JSON.stringify({act: act, arg: data, msgId: msgHandler()}));} ,10) });
+    $(table).jqGrid('restoreRow', _id, function(){ setTimeout(function() { socket.send(JSON.stringify({act: act, arg: data, msgId: msgHandler()}));} ,10) });
 }
 
 function getRoleSelect() {
@@ -2228,10 +2229,10 @@ $(document).ready(function() {
     $('.modal-content').resizable({ minHeight: 153, minWidth: 300});
     // ---------------------------- SOCKETS ----------------------------------
     if (location.protocol === 'https:') {
-        wsdg = new WebSocket('wss://' + window.location.host + '/mcscop/');
+        socket = new WebSocket('wss://' + window.location.host + '/mcscop/');
         wsdb = new WebSocket('wss://' + window.location.host + '/mcscop/');
     } else {
-        wsdg = new WebSocket('ws://' + window.location.host + '/mcscop/');
+        socket = new WebSocket('ws://' + window.location.host + '/mcscop/');
         wsdb = new WebSocket('ws://' + window.location.host + '/mcscop/');
     }
     shareDBConnection = new sharedb.Connection(wsdb);
@@ -2240,23 +2241,23 @@ $(document).ready(function() {
     };
 
     // ---------------------------- DIAGRAM SOCKET STUFF ----------------------------------
-    wsdg.onopen = function() {
+    socket.onopen = function() {
         $('#modal').modal('hide');
         $('#modal-title').text('Please wait...!');
         $('#modal-body').html('<p>Loading COP, please wait...</p><img src="images/loading.gif"/>');
         $('#modal-footer').html('');
         $('#modal').modal('show');
-        wsdg.pingIterval = setInterval(function ping() {
-            wsdg.send(JSON.stringify({ act: 'ping', arg: '', msgId: msgHandler() }));
+        socket.pingIterval = setInterval(function ping() {
+            socket.send(JSON.stringify({ act: 'ping', arg: '', msgId: msgHandler() }));
         }, 10000);
         setTimeout(function() {
             console.log('connect');
             console.log('joining mission: ' + mission_id);
-            wsdg.send(JSON.stringify({ act:'join', arg: {mission_id: mission_id}, msgId: msgHandler() }));
+            socket.send(JSON.stringify({ act:'join', arg: {mission_id: mission_id}, msgId: msgHandler() }));
         }, 100);
     };
     // message handler
-    wsdg.onmessage = function(msg) {
+    socket.onmessage = function(msg) {
         msg = JSON.parse(msg.data);
         switch(msg.act) {
             // general
@@ -2622,7 +2623,7 @@ $(document).ready(function() {
         }
     };
 
-    wsdg.onclose = function() {
+    socket.onclose = function() {
         canvas.clear();
         canvas.requestRenderAll();
         $('#modal-close').hide();
@@ -2909,7 +2910,7 @@ $(document).ready(function() {
                 data.event_time = dateStringToEpoch(data.event_time);
             delete data.actions;
             delete data.undefined;
-            wsdg.send(JSON.stringify({act: 'update_opnote', arg: data, msgId: msgHandler()}));
+            socket.send(JSON.stringify({act: 'update_opnote', arg: data, msgId: msgHandler()}));
         },
         afterEditCell: function(id, name, val, iRow, iCol) {
             // this handles clicking outside a cell while editing... a janky blur
@@ -2957,7 +2958,7 @@ $(document).ready(function() {
                                 $('#opnotes2').jqGrid('restoreRow', id, function(){});
                                 data.event_time = dateStringToEpoch(data.event_time);
                                 delete data.actions;
-                                wsdg.send(JSON.stringify({act: 'insert_opnote', arg: data, msgId: msgHandler()}));
+                                socket.send(JSON.stringify({act: 'insert_opnote', arg: data, msgId: msgHandler()}));
                                 $('#opnotes2').jqGrid('resetSelection');
                             },
                             // called when creating a new row
@@ -3162,7 +3163,7 @@ $(document).ready(function() {
             if (data.discovery_time)
                 data.discovery_time = dateStringToEpoch(data.discovery_time);
             delete data.actions;
-            wsdg.send(JSON.stringify({act: 'update_event', arg: data, msgId: msgHandler()}));
+            socket.send(JSON.stringify({act: 'update_event', arg: data, msgId: msgHandler()}));
         },
         afterEditCell: function(id, name, val, iRow, iCol) {
             // this handles clicking outside a cell while editing... a janky blur
@@ -3210,7 +3211,7 @@ $(document).ready(function() {
                                 data.event_time = dateStringToEpoch(data.event_time);
                                 data.discovery_time = dateStringToEpoch(data.discovery_time);
                                 delete data.actions;
-                                $('#events2').jqGrid('restoreRow', id, function(){ setTimeout(function () { wsdg.send(JSON.stringify({act: 'insert_event', arg: data, msgId: msgHandler()})); } , 10); });
+                                $('#events2').jqGrid('restoreRow', id, function(){ setTimeout(function () { socket.send(JSON.stringify({act: 'insert_event', arg: data, msgId: msgHandler()})); } , 10); });
                                 $('#events2').jqGrid('resetSelection');
                             },
                             oneditfunc: function(id) {
@@ -3338,7 +3339,7 @@ $(document).ready(function() {
             delete data.actions;
             if (!Array.isArray(data.permissions))
                 data.permissions = data.permissions.split(',');
-            wsdg.send(JSON.stringify({act: 'update_user_setting', arg: data, msgId: msgHandler()}));
+            socket.send(JSON.stringify({act: 'update_user_setting', arg: data, msgId: msgHandler()}));
         },
         afterEditCell: function(id, name, val, iRow, iCol) {
             // this handles clicking outside a cell while editing... a janky blur
@@ -3383,7 +3384,7 @@ $(document).ready(function() {
                                     data[this.name] = $(this).val();
                                 });
                                 delete data.actions;
-                                $('#users').jqGrid('restoreRow', id, function(){ setTimeout(function () { wsdg.send(JSON.stringify({act: 'insert_user', arg: data, msgId: msgHandler()})); } , 10); });
+                                $('#users').jqGrid('restoreRow', id, function(){ setTimeout(function () { socket.send(JSON.stringify({act: 'insert_user', arg: data, msgId: msgHandler()})); } , 10); });
                                 $('#users').jqGrid('resetSelection');
                             },
                             oneditfunc: function(id) {
