@@ -631,8 +631,6 @@ async function setupSocket(socket) {
 
                         var new_values = { $set: { 'mission_users.$.permissions': new_perms, 'mission_users.$.role': null }  };
 
-                        console.log(new_values);
-
                         if (user.role && ObjectID.isValid(user.role))
                             new_values.$set['mission_users.$.role'] = ObjectID(user.role);
 
@@ -1105,7 +1103,6 @@ async function setupSocket(socket) {
                     break;
 
             }
-            console.log(msg.msgId);
             if (msg.msgId !== undefined) {
                 socket.send(JSON.stringify({act: 'ack', arg: msg.msgId}));
             }
