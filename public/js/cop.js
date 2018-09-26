@@ -1229,13 +1229,11 @@ function checkIfObjectsLoaded() {
     if (objectsLoaded.length == 0) {
         console.log('objects loaded');
         $('#modal').modal('hide');
-        //TODO:
-
+        //FIXME
         // objects loaded, update the events tracker
         $('#events2').jqGrid('setColProp', 'dest_object', { editoptions: { value: getObjectSelect() }});
         $('#events2').jqGrid('setColProp', 'source_object', { editoptions: { value: getObjectSelect() }});
         $('#events2').jqGrid().trigger('reloadGrid');
-
         updateLinks();
         updateMinimapBg();
         canvas.requestRenderAll();
@@ -1506,25 +1504,20 @@ function zoomOut() {
     updateMinimap();
 }
 
-// FIXME
 function epochToDateString(value){
     if (isNaN(value)) {
         return value;
     }
-    var date = new Date(parseInt(value));
-    return (date.getFullYear() + '-' + addZero(date.getMonth()+1) + '-' + addZero(date.getDate()) + ' ' + addZero(date.getHours()) + ':' + addZero(date.getMinutes()) + ':' + addZero(date.getSeconds()) + '.' + date.getMilliseconds());
-    
+    else return(getDate(parseInt(value)));
 }
 
-function getDate() {
-    var date = new Date();
+function getDate(value) {
+    var date;
+    if (value !== undefined)
+        date = new Date(value);
+    else
+        date = new Date();
     return date.getFullYear() + '-' + addZero(date.getMonth()+1) + '-' + addZero(date.getDate()) + ' ' + addZero(date.getHours()) + ':' + addZero(date.getMinutes()) + ':' + addZero(date.getSeconds()) + '.' + date.getMilliseconds();
-}
-
-// generate pretty timestamp for tables
-function timestamp(str){
-    var date = new Date(str);
-    return (date.getFullYear() + '-' + addZero(date.getMonth()+1) + '-' + addZero(date.getDate()) + ' ' + addZero(date.getHours()) + ':' + addZero(date.getMinutes()) + ':' + addZero(date.getSeconds()) + '.' + date.getMilliseconds());
 }
 
 function dateStringToEpoch(value) {
@@ -2108,16 +2101,11 @@ function startTime() {
     var uh = today.getUTCHours();
     var m = today.getMinutes();
     var s = today.getSeconds();
-    m = checkTime(m);
-    s = checkTime(s);
+    m = addZero(m);
+    s = addZero(s);
     $('#est').html('Local: ' + eh + ":" + m + ":" + s);
     $('#utc').html('UTC: ' + uh + ":" + m + ":" + s);
     var t = setTimeout(startTime, 500);
-}
-
-function checkTime(i) {
-    if (i < 10) {i = "0" + i};
-    return i;
 }
 
 function deleteObjectConfirm() {
@@ -2707,7 +2695,7 @@ $(document).ready(function() {
                 if (rows[i]) {
                     if (filter.indexOf(i) !== -1) {
                         if (filter.length === 1)
-                            $('#message').html('<span class="messageHeader">' + timestamp(rows[i].event_time) + '</span><br/><span class="messageBody">' + rows[i].short_desc.replace('\n','<br>') + '</span>');
+                            $('#message').html('<span class="messageHeader">' + getDate(rows[i].event_time) + '</span><br/><span class="messageBody">' + rows[i].short_desc.replace('\n','<br>') + '</span>');
                         $($('#events2').jqGrid('getInd', rows[i]._id, true)).addClass('highlight');
                         var from = null;
                         var to = null;
